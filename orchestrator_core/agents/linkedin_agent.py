@@ -24,7 +24,7 @@ from orchestrator_core.tools.web_search import search_web
 logger = logging.getLogger(__name__)
 
 AGENT_NAME = "linkedin_agent"
-TOOL_ALLOWLIST: frozenset[str] = frozenset({"ddg_search", "fetch_page", "propose_action"})
+TOOL_ALLOWLIST: frozenset[str] = frozenset({"ddg_search", "fetch_page", "browser_read", "propose_action"})
 
 AAQIL_PROFILE = """
 Farhan Aaqil

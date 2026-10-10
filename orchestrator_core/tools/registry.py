@@ -17,6 +17,7 @@ from typing import Any, Optional
 
 from orchestrator_core.tools.propose.propose_action import ProposeActionArgs, propose_action
 from orchestrator_core.tools.read.arxiv_search import ArxivSearchArgs, _arxiv_breaker, arxiv_search
+from orchestrator_core.tools.read.browser_read import BrowserReadArgs, browser_read
 from orchestrator_core.tools.read.ddg_search import DDGSearchArgs, _ddg_breaker, ddg_search
 from orchestrator_core.tools.read.email_read import EmailReadArgs, email_read
 from orchestrator_core.tools.read.fetch_page import FetchPageArgs, fetch_page
@@ -40,14 +41,14 @@ AGENT_TOOL_ALLOWLISTS: dict[str, frozenset[str]] = {
     "github_agent": frozenset({"github_read", "propose_action"}),
     # Email: read unread inbox correspondence; propose outbound emails
     "email_agent": frozenset({"email_read", "propose_action"}),
-    # LinkedIn: search public profiles, fetch articles, propose LinkedIn posts
-    "linkedin_agent": frozenset({"ddg_search", "fetch_page", "propose_action"}),
+    # LinkedIn: search public profiles, fetch articles, sandbox browser inspection, propose LinkedIn posts
+    "linkedin_agent": frozenset({"ddg_search", "fetch_page", "browser_read", "propose_action"}),
     # Info: system documentation and reference lookups
     "info_agent": frozenset({"google_search", "fetch_page", "ddg_search"}),
     # General Chat: casual search
     "general_chat_agent": frozenset({"ddg_search"}),
     # Master orchestrator agent: full autonomous research, search, and proposal coordination
-    "orchestrator": frozenset({"google_search", "fetch_page", "arxiv_search", "ddg_search", "github_read", "email_read", "propose_action"}),
+    "orchestrator": frozenset({"google_search", "fetch_page", "arxiv_search", "ddg_search", "github_read", "email_read", "browser_read", "propose_action"}),
 }
 
 from orchestrator_core.models import AGENT_ALIASES, canonical_agent_name
@@ -221,6 +222,19 @@ def create_default_registry() -> ToolRegistry:
             func=propose_action,
             schema=ProposeActionArgs,
             timeout_s=10.0,
+            cacheable=False,
+        )
+    )
+
+    # 8. Browser Read (Playwright Sandbox)
+    reg.register(
+        ToolSpec(
+            name="browser_read",
+            capability=Capability.READ,
+            description="Safely inspect and read dynamic webpages using isolated Playwright browser sandbox.",
+            func=browser_read,
+            schema=BrowserReadArgs,
+            timeout_s=20.0,
             cacheable=False,
         )
     )
