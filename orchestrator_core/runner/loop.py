@@ -24,6 +24,7 @@ from typing import Any, Callable, Optional
 from orchestrator_core.config import get_settings
 from orchestrator_core.core.approval_gate import request_approval
 from orchestrator_core.exceptions import (
+    BudgetExceededError,
     JobError,
     KillSwitchActiveError,
     LoopDetectedError,
@@ -155,6 +156,25 @@ def run_job(
         except KillSwitchActiveError as exc:
             logger.critical("Aborting job %s due to emergency kill switch: %s", job.id, exc)
             return JobService.transition(job.id, "cancelled", db, error=str(exc), worker_id=worker_id)
+        except BudgetExceededError as exc:
+            logger.critical("Aborting job %s due to daily budget ceiling: %s", job.id, exc)
+            from orchestrator_core.jobs.events import event_hub
+            from orchestrator_core.storage.db import log_audit
+            event_hub.publish("system.budget_alarm", {
+                "job_id": job.id,
+                "current_cost": exc.current_cost,
+                "budget_limit": exc.budget_limit,
+                "message": str(exc),
+            })
+            log_audit(
+                actor="runner_caps",
+                event="budget_ceiling_exceeded",
+                entity="job",
+                entity_id=job.id,
+                detail={"current_cost": exc.current_cost, "budget_limit": exc.budget_limit},
+                db=db,
+            )
+            return JobService.transition(job.id, "failed", db, error=str(exc), worker_id=worker_id)
         except JobError as exc:
             logger.error("Job %s failed guardrail check: %s", job.id, exc)
             return JobService.transition(job.id, "failed", db, error=str(exc), worker_id=worker_id)

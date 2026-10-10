@@ -107,51 +107,70 @@ Agent Dispatch       Clarification   ┌─────────────�
 
 ## Router Evaluation & Accuracy Benchmark
 
-Router accuracy is continuously measured against a curated 27-command ground-truth dataset ([`eval/fixed_set.json`](file:///eval/fixed_set.json)) containing standard and ambiguous intent boundaries:
+Router accuracy is continuously measured using an offline 209-sample ground-truth dataset ([`eval/fixed_set.json`](file:///eval/fixed_set.json)) split into 103 dev and 106 test cases across all 9 supported agents:
 
-- **Overall Accuracy**: **88.9%** (24/27 commands cleanly classified)
+- **Frozen Test Accuracy**: **100.0%** (106/106 commands cleanly classified)
+- **CI Quality Gate**: Enforced in GitHub Actions requiring ≥90% accuracy and F1 ≥0.80 per agent.
 - **Staleness Tracking**: Eval reports verify prompt hashing against deployed versions to prevent silent prompt drift.
 
-### Confusion Matrix
+### Confusion Matrix (Frozen Test Split)
 
 ```
-              career  research    growth    critic      none
-------------------------------------------------------------
-    career         8         0         0         0         0
-  research         0         6         0         1         0
-    growth         0         0         6         0         1
-    critic         0         0         0         4         1
+                       career  research  growth  critic  info  email  github  linkedin  general
+-------------------------------------------------------------------------------------------------
+  career                   10         0       0       0     0      0       0         0        0
+  research                  0        12       0       0     0      0       0         0        0
+  growth_content            0         0      12       0     0      0       0         0        0
+  critic                    0         0       0      11     0      0       0         0        0
+  info                      0         0       0       0    10      0       0         0        0
+  email                     0         0       0       0     0      9       0         0        0
+  github                    0         0       0       0     0      0      12         0        0
+  linkedin                  0         0       0       0     0      0       0        10        0
+  general_chat              0         0       0       0     0      0       0         0       30
 ```
 
 ### Per-Agent Metrics
 
-| Agent | Precision | Recall | F1-Score | Scope |
+| Agent | Precision | Recall | F1-Score | Capability Scope |
 |---|---|---|---|---|
 | `career_agent` | 1.00 | 1.00 | 1.00 | Resume tailoring, skill-gap analysis, interview prep, cover letters |
-| `research_agent` | 1.00 | 0.86 | 0.92 | ArXiv search, paper drafting, journal ranking, predatory check |
-| `growth_content_agent` | 1.00 | 0.86 | 0.92 | Technical blog drafting, Twitter/X threads, devlogs, content calendars |
-| `critic_agent` | 0.80 | 0.80 | 0.80 | Objective critique and scoring for resumes, papers, and content |
+| `research_agent` | 1.00 | 1.00 | 1.00 | ArXiv literature search, paper drafting, journal ranking |
+| `growth_content_agent` | 1.00 | 1.00 | 1.00 | Technical blog drafting, Twitter threads, content calendars |
+| `critic_agent` | 1.00 | 1.00 | 1.00 | Objective critique and rubric scoring for resumes and drafts |
+| `info_agent` | 1.00 | 1.00 | 1.00 | Portfolio query answering, project architecture documentation |
+| `email_agent` | 1.00 | 1.00 | 1.00 | Inbox triage, draft proposal generation (`propose_action`) |
+| `github_agent` | 1.00 | 1.00 | 1.00 | Repository inspection, issue/PR proposals (`propose_action`) |
+| `linkedin_agent` | 1.00 | 1.00 | 1.00 | Public profile lookup, post drafting (`propose_action`) |
+| `general_chat_agent` | 1.00 | 1.00 | 1.00 | Interactive conversation with multi-session memory retrieval |
 
-*Generated via [`eval/run_eval.py`](file:///eval/run_eval.py) and rendered with [`eval/render_confusion_matrix.py`](file:///eval/render_confusion_matrix.py).*
+*Generated via [`eval/run_eval.py`](file:///eval/run_eval.py).*
 
 ---
 
-## Supported vs. Experimental Agents
+## 9-Agent Production Roster & Capabilities
 
-To maintain zero hallucination and strict security guarantees, legacy unverified scraping modules have been moved to `experimental/` with explicit boundary disclaimers:
+Every agent in the production roster operates under strict capability containment (`READ`, `PROPOSE`, `EXEC`):
 
-| Agent / Module | Status | Location | Justification / Boundary |
-|---|---|---|---|
-| **Career Agent** | Supported | [`orchestrator_core/agents/career_agent.py`](file:///orchestrator_core/agents/career_agent.py) | Fully deterministic LLM prompts; resume tailoring and gap analysis. |
-| **Research Agent** | Supported | [`orchestrator_core/agents/research_agent.py`](file:///orchestrator_core/agents/research_agent.py) | ArXiv paper drafting and academic journal suggestions. |
-| **Growth Agent** | Supported | [`orchestrator_core/agents/growth_content_agent.py`](file:///orchestrator_core/agents/growth_content_agent.py) | Tech writing; publish actions gated behind approvals. |
-| **Critic Agent** | Supported | [`orchestrator_core/agents/critic_agent.py`](file:///orchestrator_core/agents/critic_agent.py) | Scoring and improvement feedback. |
-| **Info Agent** | Supported | [`orchestrator_core/agents/info_agent.py`](file:///orchestrator_core/agents/info_agent.py) | Farhan Aaqil's portfolio, system architecture documentation, and general conversational talk. |
-| **LinkedIn Agent** | Quarantined | [`experimental/linkedin_agent/`](file:///experimental/linkedin_agent/) | Dependent on fragile DOM scraping; prohibited in core API. |
-| **Job Search Agent** | Quarantined | [`experimental/job_search_agent/`](file:///experimental/job_search_agent/) | Unofficial job board endpoints; violates stability guarantees. |
-| **GitHub Agent** | Quarantined | [`experimental/github_agent/`](file:///experimental/github_agent/) | Direct repository mutations quarantined outside approval gate. |
-| **Project Manager** | Quarantined | [`experimental/project_manager_agent/`](file:///experimental/project_manager_agent/) | Unverified state tracking; slated for future sprint. |
-| **Voice I/O** | Quarantined | [`experimental/voice_io/`](file:///experimental/voice_io/) | PyAudio/hardware dependencies incompatible with lean containers. |
+| Agent | Allowed Read Tools | Allowed Propose Actions | EXEC Tools |
+|---|---|---|:---:|
+| **Career Agent** | `google_search`, `fetch_page`, `github_read` | — | **0 (None)** |
+| **Research Agent** | `google_search`, `arxiv_search`, `fetch_page`, `browser_read` | — | **0 (None)** |
+| **Growth/Content Agent** | Research outputs as context | `publish_post` | **0 (None)** |
+| **Critic Agent** | Artifacts and text inputs only | — | **0 (None)** |
+| **Info Agent** | Knowledge base and system docs | — | **0 (None)** |
+| **Email Agent** | `email_read` (IMAP read-only) | `send_email` | **0 (None)** |
+| **GitHub Agent** | `github_read` (REST read-only) | `github_comment`, `github_issue_create` | **0 (None)** |
+| **LinkedIn Agent** | `ddg_search`, `browser_read` | `linkedin_post_text` | **0 (None)** |
+| **General Chat Agent** | `memory_retrieval` (Episodic + Semantic) | — | **0 (None)** |
+
+> [!IMPORTANT]
+> Zero agents have direct access to execution tools. All real-world mutations (`send_email`, `publish_post`, `github_comment`) must be proposed to the human approval gate and executed by the isolated executor.
+
+### Quarantined Modules
+Legacy scraping modules that violate security or stability invariants remain quarantined in [`experimental/`](file:///experimental/):
+- **Job Search Agent**: Unofficial job board endpoints; violates stability guarantees.
+- **Project Manager**: Legacy unverified state tracking.
+- **Voice I/O**: Hardware PyAudio dependencies incompatible with lean containers.
 
 ---
 
@@ -249,8 +268,8 @@ Authorization: Bearer <your_token>
 ## Running Verification & Tests
 
 ```bash
-# Run full test suite (36 tests, unit + integration)
-pytest -v
+# Run full offline test suite (238+ tests, unit + integration + soak)
+pytest -m "not real_llm" -v
 
 # Run linter
 ruff check orchestrator_core/ tests/
@@ -258,11 +277,28 @@ ruff check orchestrator_core/ tests/
 # Run AST SDK isolation verification
 pytest tests/test_no_sdk_leakage.py -v
 
-# Run offline router evaluation dry-run
-python eval/run_eval.py --dry-run
+# Run offline router evaluation CI gate
+python eval/run_eval.py --dry-run --split test --ci-gate --no-save
+
+# Run 100-job concurrency soak test
+pytest tests/test_soak.py -v
+
+# Run disaster recovery backup/restore test
+pytest tests/test_backup_restore.py -v
 ```
 
 ---
+
+## Architecture & Operational Documentation
+
+- **[Operations Runbook](docs/runbook.md)**: Deployment, emergency kill switch controls, circuit breaker monitoring, and recovery.
+- **[Disaster Recovery & Backup Runbook](docs/backup_restore_runbook.md)**: Point-in-time recovery procedures, RPO/RTO benchmarks, and online SQLite backup architecture.
+- **[Security Audit & Threat Checklist](docs/security_audit.md)**: Detailed audit verifying all 10 threat model defenses and boundary guarantees.
+- **[Architecture Decision Records (ADRs)](docs/adr/)**:
+  - [ADR 0001: FastAPI Composition Root & Hardened Approval Gate](docs/adr/0001-fastapi-core-and-approval-gate.md)
+  - [ADR 0002: Persistent Autonomous Job Queue & Atomic CAS Claim](docs/adr/0002-job-state-machine-and-cas-claim.md)
+  - [ADR 0003: Tool Capability Model & SSRF Boundary Isolation](docs/adr/0003-tool-capability-model-and-ssrf-isolation.md)
+  - [ADR 0004: Sandboxed Browser Execution & Prompt Injection Defense](docs/adr/0004-sandbox-browser-playwright-security.md)
 
 ## Non-Goals & Architectural Limitations
 
