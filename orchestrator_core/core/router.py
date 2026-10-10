@@ -197,8 +197,16 @@ def _call_groq(command: str) -> dict:
         return json.loads(raw)
     except Exception as exc:
         err_msg = str(exc).lower()
-        if "api_key" in err_msg or "401" in err_msg or "unauthorized" in err_msg or "invalid api key" in err_msg:
-            logger.warning("[router] Groq API key is invalid/expired (%s) — using heuristic routing.", exc)
+        if (
+            "api_key" in err_msg
+            or "401" in err_msg
+            or "unauthorized" in err_msg
+            or "invalid api key" in err_msg
+            or "json_validate_failed" in err_msg
+            or "failed to validate json" in err_msg
+            or "400" in err_msg
+        ):
+            logger.warning("[router] Groq API returned error (%s) — using heuristic routing.", exc)
             return _heuristic_classify(command)
         raise
 
