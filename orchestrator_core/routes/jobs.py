@@ -18,7 +18,7 @@ import logging
 import sqlite3
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -95,13 +95,15 @@ async def create_job(
 
 @router.get("/events")
 async def stream_job_events(
+    last_event_id: Optional[str] = Header(default=None, alias="Last-Event-ID"),
     _token: Optional[str] = Depends(verify_bearer_token),
 ):
     """
     SSE stream of real-time job state transitions, steps, and system notifications.
+    Supports reconnection replay via Last-Event-ID header.
     """
     return StreamingResponse(
-        event_hub.subscribe(),
+        event_hub.subscribe(last_event_id=last_event_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

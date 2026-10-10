@@ -190,6 +190,21 @@ CREATE INDEX IF NOT EXISTS idx_memory_items_kind ON memory_items(kind);
 CREATE INDEX IF NOT EXISTS idx_memory_items_pending ON memory_items(pending_review);
 CREATE INDEX IF NOT EXISTS idx_memory_items_deleted ON memory_items(deleted);
 CREATE INDEX IF NOT EXISTS idx_memory_items_session ON memory_items(source_session_id);
+
+-- 12. Recurring autonomous schedules table
+CREATE TABLE IF NOT EXISTS schedules (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    agent TEXT NOT NULL,
+    goal TEXT NOT NULL,
+    cron_expr TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    last_run_at TIMESTAMP,
+    next_run_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_schedules_active ON schedules(is_active);
 """
 
 
@@ -226,6 +241,18 @@ def run_migrations(conn: sqlite3.Connection) -> None:
         )
         conn.execute(
             "INSERT OR IGNORE INTO system_flags (key, value) VALUES ('daily_budget_usd', '5.00');"
+        )
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO schedules (id, name, agent, goal, cron_expr, is_active)
+            VALUES ('daily_briefing', 'Daily Executive Briefing', 'briefing_agent', 'Generate morning executive briefing of tech trends, messages, and priority tasks', '0 8 * * *', 1);
+            """
+        )
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO schedules (id, name, agent, goal, cron_expr, is_active)
+            VALUES ('stale_approval_cleanup', 'Stale Approval Cleanup', 'orchestrator', 'Audit and expire stale approval requests pending over 24 hours', '*/30 * * * *', 1);
+            """
         )
 
 
