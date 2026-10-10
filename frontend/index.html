@@ -404,6 +404,221 @@
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
       },
+      // ── Autonomous Jobs (Phase 5 & 8) ──
+      getJobs: async (params = {}) => {
+        const q = new URLSearchParams();
+        if (params.status && params.status !== 'all') q.set('status', params.status);
+        if (params.agent) q.set('agent', params.agent);
+        if (params.limit) q.set('limit', params.limit);
+        const qs = q.toString() ? `?${q.toString()}` : '';
+        const res = await fetch(`/jobs${qs}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      },
+      getJob: async (id) => {
+        const res = await fetch(`/jobs/${id}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      },
+      getJobSteps: async (id) => {
+        const res = await fetch(`/jobs/${id}/steps`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      },
+      createJob: async (data) => {
+        const res = await fetch('/jobs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      },
+      cancelJob: async (id) => {
+        const res = await fetch(`/jobs/${id}/cancel`, { method: 'POST' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      },
+      answerJob: async (id, answer) => {
+        const res = await fetch(`/jobs/${id}/answer`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ answer })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      },
+      // ── Schedules (Phase 8) ──
+      getSchedules: async () => {
+        const res = await fetch('/schedules');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      },
+      createSchedule: async (data) => {
+        const res = await fetch('/schedules', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      },
+      updateSchedule: async (id, data) => {
+        const res = await fetch(`/schedules/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      },
+      deleteSchedule: async (id) => {
+        const res = await fetch(`/schedules/${id}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      },
+      runSchedule: async (id) => {
+        const res = await fetch(`/schedules/${id}/run`, { method: 'POST' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      },
+      // ── Memory (Phase 7 & 8) ──
+      getMemories: async (params = {}) => {
+        const q = new URLSearchParams();
+        if (params.kind) q.set('kind', params.kind);
+        if (params.pending_review !== undefined) q.set('pending_review', String(params.pending_review));
+        if (params.limit) q.set('limit', String(params.limit));
+        const qs = q.toString() ? `?${q.toString()}` : '';
+        const res = await fetch(`/memory${qs}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      },
+      createMemory: async (data) => {
+        const res = await fetch('/memory', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      },
+      updateMemory: async (id, data) => {
+        const res = await fetch(`/memory/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      },
+      confirmMemory: async (id) => {
+        const res = await fetch(`/memory/${id}/confirm`, { method: 'POST' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      },
+      deleteMemory: async (id) => {
+        const res = await fetch(`/memory/${id}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      },
+      summarizeSession: async (sessionId) => {
+        const res = await fetch(`/memory/summarize/${sessionId}`, { method: 'POST' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      },
+      // ── System Flags & Settings ──
+      getSystemFlags: async () => {
+        const res = await fetch('/system/flags');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      },
+      toggleKillSwitch: async (on) => {
+        const res = await fetch('/system/kill-switch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ on })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      },
+      setDailyBudget: async (budget) => {
+        const res = await fetch('/system/budget', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ daily_budget_usd: budget })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      },
+      updateAgent: async (id, isActive) => {
+        const res = await fetch(`/agents/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ is_active: isActive })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      },
+      subscribeJobEvents: (callbacks = {}) => {
+        let isClosed = false;
+        let lastEventId = null;
+        let retryDelay = 1000;
+        let es = null;
+        let timer = null;
+
+        function connect() {
+          if (isClosed) return;
+          callbacks.onStatusChange?.('reconnecting');
+          const url = `/jobs/events${lastEventId ? `?last_event_id=${encodeURIComponent(lastEventId)}` : ''}`;
+          try {
+            es = new EventSource(url);
+            es.onopen = () => {
+              retryDelay = 1000;
+              callbacks.onStatusChange?.('connected');
+            };
+            es.onmessage = (e) => {
+              if (e.lastEventId) lastEventId = e.lastEventId;
+              try {
+                const parsed = JSON.parse(e.data);
+                callbacks.onEvent?.(parsed.event || 'message', parsed.data || parsed);
+              } catch {
+                callbacks.onEvent?.('raw', e.data);
+              }
+            };
+            ['job.created', 'job.updated', 'job.step', 'job.completed', 'agent.status'].forEach((evName) => {
+              es.addEventListener(evName, (e) => {
+                if (e.lastEventId) lastEventId = e.lastEventId;
+                try {
+                  const parsed = JSON.parse(e.data);
+                  callbacks.onEvent?.(evName, parsed.data || parsed);
+                } catch {
+                  callbacks.onEvent?.(evName, e.data);
+                }
+              });
+            });
+            es.onerror = () => {
+              if (es) { es.close(); es = null; }
+              callbacks.onStatusChange?.('offline');
+              if (!isClosed) {
+                timer = setTimeout(() => {
+                  retryDelay = Math.min(retryDelay * 1.5, 15000);
+                  connect();
+                }, retryDelay);
+              }
+            };
+          } catch {
+            callbacks.onStatusChange?.('offline');
+            if (!isClosed) timer = setTimeout(connect, retryDelay);
+          }
+        }
+        connect();
+        return () => {
+          isClosed = true;
+          if (timer) clearTimeout(timer);
+          if (es) { es.close(); es = null; }
+          callbacks.onStatusChange?.('offline');
+        };
+      },
     };
 
     // ── Accessible Status Pill ──
@@ -446,8 +661,25 @@
       const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth > 900);
       const [isListening, setIsListening] = useState(false);
       const [voiceOutput, setVoiceOutput] = useState(false);
+      const [isPinned, setIsPinned] = useState(true);
       const messagesEndRef = useRef(null);
+      const chatContainerRef = useRef(null);
       const recognitionRef = useRef(null);
+
+      // IntersectionObserver sentinel on bottom message element
+      useEffect(() => {
+        const sentinel = messagesEndRef.current;
+        if (!sentinel) return;
+        const observer = new IntersectionObserver((entries) => {
+          const [entry] = entries;
+          setIsPinned(entry.isIntersecting);
+        }, {
+          root: chatContainerRef.current,
+          threshold: 0.1
+        });
+        observer.observe(sentinel);
+        return () => observer.disconnect();
+      }, []);
 
       // Listen for global voice toggle from tray or IPC
       useEffect(() => {
@@ -613,10 +845,17 @@
         { label: "⚠️ Trigger Clarification", cmd: "What should I do next?" }
       ];
 
-      // Auto-scroll chat to bottom
+      // Auto-scroll chat to bottom ONLY if pinned (prevents yank if user scrolled up)
       useEffect(() => {
+        if (isPinned) {
+          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }
+      }, [messages, loading, isPinned]);
+
+      const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-      }, [messages, loading]);
+        setIsPinned(true);
+      };
 
       const handleExecute = async (cmdOverride) => {
         const cmdToRun = (cmdOverride || command).trim();
@@ -882,13 +1121,36 @@
                             <span>{getAgentBadge(a.id)}</span>
                             <span>{a.id === 'general_chat_agent' ? 'Toji' : a.name}</span>
                           </span>
-                          <span className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded border ${
-                            hasGated
-                              ? 'bg-amber-50 text-amber-800 border-amber-300'
-                              : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                          }`}>
-                            {hasGated ? 'GATED' : 'READY'}
-                          </span>
+                          <div className="flex items-center gap-1">
+                            <span className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded border ${
+                              a.is_active === false
+                                ? 'bg-slate-200 text-slate-700 border-slate-300'
+                                : hasGated
+                                ? 'bg-amber-50 text-amber-800 border-amber-300'
+                                : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            }`}>
+                              {a.is_active === false ? 'DISABLED' : hasGated ? 'GATED' : 'HEALTHY'}
+                            </span>
+                            <button
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                try {
+                                  await api.updateAgent(a.id, a.is_active === false);
+                                  loadAgents();
+                                } catch (err) {
+                                  alert('Toggle failed: ' + err.message);
+                                }
+                              }}
+                              className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded border transition-all ${
+                                a.is_active === false
+                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                                  : 'bg-silver-100 text-silver-700 border-silver-300 hover:bg-rose-50 hover:text-rose-700'
+                              }`}
+                              title={a.is_active === false ? 'Enable Agent' : 'Disable Agent'}
+                            >
+                              {a.is_active === false ? 'Enable' : 'Disable'}
+                            </button>
+                          </div>
                         </div>
                         <p className="text-[10px] text-silver-600 truncate leading-tight">{a.description}</p>
                       </div>
@@ -940,7 +1202,7 @@
               </div>
 
               {/* Center: Message Stream (Scrollable within fixed chatbot container) */}
-              <div className="flex-1 p-6 overflow-y-auto space-y-5 scroll-smooth min-h-0">
+              <div ref={chatContainerRef} className="flex-1 p-6 overflow-y-auto space-y-5 scroll-smooth min-h-0 relative">
                 {messages.map(m => {
                   if (m.role === 'user') {
                     return (
@@ -1088,6 +1350,15 @@
                       <div className="h-3.5 bg-silver-200 rounded-md w-4/5"></div>
                     </div>
                   </div>
+                )}
+
+                {!isPinned && (
+                  <button
+                    onClick={scrollToBottom}
+                    className="sticky bottom-3 left-1/2 -translate-x-1/2 mx-auto px-4 py-2 rounded-full bg-accent-primary hover:bg-accent-hover text-white text-xs font-mono font-bold shadow-xl flex items-center gap-1.5 transition-all animate-bounce z-20 cursor-pointer"
+                  >
+                    <span>Jump to latest ↓</span>
+                  </button>
                 )}
 
                 <div ref={messagesEndRef} />
@@ -1534,13 +1805,18 @@
     // ── VIEW 5: ROUTER BENCHMARK & EVAL ──
     function EvalView() {
       const [evalData, setEvalData] = useState(null);
+      const [jobs, setJobs] = useState([]);
       const [loading, setLoading] = useState(true);
       const [running, setRunning] = useState(false);
 
       const load = async () => {
         try {
-          const data = await api.getEval();
+          const [data, jobsData] = await Promise.all([
+            api.getEval().catch(() => null),
+            api.getJobs({ limit: 100 }).catch(() => ({ items: [] }))
+          ]);
           setEvalData(data);
+          setJobs(jobsData?.items || []);
         } catch (err) {
           console.error(err);
         } finally {
@@ -1567,6 +1843,13 @@
       const expected = Object.keys(matrix);
       const predicted = expected.concat(['none']);
 
+      const completedJobs = jobs.filter(j => ['succeeded', 'failed'].includes(j.status));
+      const succeededJobs = jobs.filter(j => j.status === 'succeeded');
+      const workflowSuccessRate = completedJobs.length > 0
+        ? (succeededJobs.length / completedJobs.length) * 100
+        : 100.0;
+      const totalDailyCost = jobs.reduce((acc, j) => acc + (Number(j.cost_usd) || 0), 0);
+
       return (
         <div className="space-y-6">
           {/* Header */}
@@ -1576,13 +1859,13 @@
                 <span>📊</span> Router Benchmark & Accuracy Harness
               </h2>
               <p className="text-sm text-silver-800 mt-1">
-                27-command ground-truth classification benchmark with empirical confusion matrix and prompt staleness tracking.
+                27-command ground-truth classification benchmark, empirical confusion matrix, workflow success rate, and daily token spend.
               </p>
             </div>
             <button
               onClick={handleRunBenchmark}
               disabled={running}
-              className="px-4 py-2 rounded-xl bg-accent-primary hover:bg-accent-hover text-white font-bold text-xs shadow-md transition-all flex items-center gap-2 disabled:opacity-50"
+              className="px-4 py-2 rounded-xl bg-accent-primary hover:bg-accent-hover text-white font-bold text-xs shadow-md transition-all flex items-center gap-2 disabled:opacity-50 cursor-pointer"
             >
               {running ? "Benchmarking..." : "Run Benchmark Now"}
             </button>
@@ -1599,24 +1882,25 @@
             </div>
 
             <div className="bg-white border border-silver-400/80 rounded-2xl p-5 shadow-sm">
+              <span className="text-xs font-mono text-silver-600 uppercase">Workflow Success</span>
+              <div className="text-3xl font-extrabold text-emerald-700 font-mono mt-1">
+                {workflowSuccessRate.toFixed(1)}%
+              </div>
+              <span className="text-[11px] text-silver-700 font-mono mt-0.5 block">{succeededJobs.length} / {completedJobs.length || 1} completed</span>
+            </div>
+
+            <div className="bg-white border border-silver-400/80 rounded-2xl p-5 shadow-sm">
+              <span className="text-xs font-mono text-silver-600 uppercase">Daily Token Cost</span>
+              <div className="text-3xl font-extrabold text-accent-primary font-mono mt-1">
+                ${totalDailyCost.toFixed(4)}
+              </div>
+              <span className="text-[11px] text-silver-700 font-mono mt-0.5 block">Aggregated LLM spend</span>
+            </div>
+
+            <div className="bg-white border border-silver-400/80 rounded-2xl p-5 shadow-sm">
               <span className="text-xs font-mono text-silver-600 uppercase">Benchmark Suite</span>
               <div className="text-3xl font-extrabold text-silver-900 font-mono mt-1">27</div>
               <span className="text-[11px] text-silver-700 font-mono mt-0.5 block">eval/fixed_set.json</span>
-            </div>
-
-            <div className="bg-white border border-silver-400/80 rounded-2xl p-5 shadow-sm">
-              <span className="text-xs font-mono text-silver-600 uppercase">Staleness State</span>
-              <div className="text-2xl font-extrabold text-emerald-700 font-mono mt-1.5 flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-600" />
-                <span>CLEAN</span>
-              </div>
-              <span className="text-[11px] text-silver-700 font-mono mt-0.5 block">Prompt in sync with HEAD</span>
-            </div>
-
-            <div className="bg-white border border-silver-400/80 rounded-2xl p-5 shadow-sm">
-              <span className="text-xs font-mono text-silver-600 uppercase">Router Engine</span>
-              <div className="text-xl font-bold text-silver-900 font-mono mt-2 truncate">groq_router</div>
-              <span className="text-[11px] text-accent-primary font-mono mt-0.5 block">Circuit Guarded</span>
             </div>
           </div>
 
@@ -1797,12 +2081,1249 @@
       );
     }
 
+    // ── Accessible Connection Status Badge ──
+    function ConnectionStatusBadge({ status }) {
+      const configs = {
+        connected: {
+          dot: 'bg-emerald-500 animate-pulse',
+          text: 'Connected',
+          classes: 'bg-emerald-50 text-emerald-800 border-emerald-300'
+        },
+        reconnecting: {
+          dot: 'bg-amber-500 animate-ping',
+          text: 'Reconnecting...',
+          classes: 'bg-amber-50 text-amber-800 border-amber-300'
+        },
+        offline: {
+          dot: 'bg-red-500',
+          text: 'Offline',
+          classes: 'bg-red-50 text-red-800 border-red-300'
+        }
+      };
+      const cur = configs[status] || configs.offline;
+      return (
+        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono border font-medium ${cur.classes}`} title={`SSE Stream: ${cur.text}`}>
+          <span className={`w-2 h-2 rounded-full ${cur.dot}`} />
+          <span>{cur.text}</span>
+        </span>
+      );
+    }
+
+    // ── VIEW: JOBS TIMELINE & STEP TRACE ──
+    function JobsView() {
+      const [jobs, setJobs] = useState([]);
+      const [selectedJob, setSelectedJob] = useState(null);
+      const [steps, setSteps] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [loadingSteps, setLoadingSteps] = useState(false);
+      const [statusFilter, setStatusFilter] = useState('all');
+      const [expandedSteps, setExpandedSteps] = useState({});
+      const [answerText, setAnswerText] = useState('');
+      const [answering, setAnswering] = useState(false);
+      const [isCreateOpen, setIsCreateOpen] = useState(false);
+      const [newAgent, setNewAgent] = useState('research_agent');
+      const [newGoal, setNewGoal] = useState('');
+      const [newPriority, setNewPriority] = useState(0);
+      const [creating, setCreating] = useState(false);
+
+      const loadJobs = async () => {
+        try {
+          const res = await api.getJobs({ status: statusFilter !== 'all' ? statusFilter : undefined, limit: 50 });
+          setJobs(res.items || []);
+          if (selectedJob) {
+            const up = (res.items || []).find(j => j.id === selectedJob.id);
+            if (up) setSelectedJob(up);
+          }
+        } catch (err) {
+          console.error(err);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      useEffect(() => { loadJobs(); }, [statusFilter]);
+
+      useEffect(() => {
+        const unsub = api.subscribeJobEvents({
+          onEvent: (ev, data) => {
+            if (ev.startsWith('job.')) {
+              loadJobs();
+              if (selectedJob && (data.job_id === selectedJob.id || data.id === selectedJob.id)) {
+                loadSteps(selectedJob.id);
+              }
+            }
+          }
+        });
+        return () => unsub();
+      }, [selectedJob?.id]);
+
+      const loadSteps = async (id) => {
+        setLoadingSteps(true);
+        try {
+          const st = await api.getJobSteps(id);
+          setSteps(st || []);
+        } catch (err) {
+          console.error(err);
+        } finally {
+          setLoadingSteps(false);
+        }
+      };
+
+      const handleSelect = (j) => {
+        setSelectedJob(j);
+        loadSteps(j.id);
+        setExpandedSteps({});
+      };
+
+      const handleCancel = async (id) => {
+        if (!confirm('Cancel this running job?')) return;
+        try {
+          await api.cancelJob(id);
+          loadJobs();
+        } catch (err) {
+          alert('Cancel failed: ' + err.message);
+        }
+      };
+
+      const handleAnswer = async (e) => {
+        e.preventDefault();
+        if (!selectedJob || !answerText.trim()) return;
+        setAnswering(true);
+        try {
+          await api.answerJob(selectedJob.id, answerText);
+          setAnswerText('');
+          loadJobs();
+          loadSteps(selectedJob.id);
+        } catch (err) {
+          alert('Answer failed: ' + err.message);
+        } finally {
+          setAnswering(false);
+        }
+      };
+
+      const handleCreate = async (e) => {
+        e.preventDefault();
+        if (!newGoal.trim()) return;
+        setCreating(true);
+        try {
+          const created = await api.createJob({ agent: newAgent, goal: newGoal, priority: Number(newPriority) });
+          setIsCreateOpen(false);
+          setNewGoal('');
+          loadJobs();
+          handleSelect(created);
+        } catch (err) {
+          alert('Create failed: ' + err.message);
+        } finally {
+          setCreating(false);
+        }
+      };
+
+      const toggleStep = (id) => {
+        setExpandedSteps(prev => ({ ...prev, [id]: !prev[id] }));
+      };
+
+      const getKindBadge = (kind) => {
+        const map = {
+          tool_call: 'bg-indigo-100 text-indigo-800 border-indigo-300',
+          propose: 'bg-amber-100 text-amber-800 border-amber-300',
+          llm_call: 'bg-purple-100 text-purple-800 border-purple-300',
+          ask_user: 'bg-blue-100 text-blue-800 border-blue-300',
+          final: 'bg-emerald-100 text-emerald-800 border-emerald-300',
+          error: 'bg-red-100 text-red-800 border-red-300'
+        };
+        return <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold border ${map[kind] || 'bg-slate-100 text-slate-700'}`}>{kind.toUpperCase()}</span>;
+      };
+
+      return (
+        <div className="space-y-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-silver-500/40 pb-5">
+            <div>
+              <h2 className="text-2xl font-extrabold text-silver-900 tracking-tight flex items-center gap-2.5">
+                <span>💼</span> Autonomous Jobs Timeline & Step Telemetry
+              </h2>
+              <p className="text-sm text-silver-800 mt-1">
+                Inspect autonomous execution loops, step latency, tool observations, token budgets, and human directives.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={loadJobs} className="px-3.5 py-2 rounded-xl bg-white hover:bg-silver-100 border border-silver-300 text-silver-800 font-bold text-xs transition-all flex items-center gap-1.5 shadow-xs cursor-pointer">
+                <span>↻ Refresh</span>
+              </button>
+              <button onClick={() => setIsCreateOpen(true)} className="px-4 py-2 rounded-xl bg-accent-primary hover:bg-accent-hover text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5 cursor-pointer">
+                <span>+ New Job</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <div className="lg:col-span-5 space-y-4">
+              <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-silver-300 text-xs font-mono overflow-x-auto">
+                {['all', 'running', 'awaiting_input', 'queued', 'succeeded', 'failed'].map(st => (
+                  <button
+                    key={st}
+                    onClick={() => setStatusFilter(st)}
+                    className={`px-2.5 py-1.5 rounded-lg transition-all capitalize whitespace-nowrap cursor-pointer ${
+                      statusFilter === st ? 'bg-accent-primary text-white font-bold' : 'text-silver-700 hover:text-silver-950'
+                    }`}
+                  >
+                    {st.replace('_', ' ')}
+                  </button>
+                ))}
+              </div>
+
+              <div className="space-y-2.5">
+                {loading ? (
+                  <div className="p-8 text-center text-xs font-mono text-silver-600 bg-white rounded-2xl border border-silver-300">Loading jobs...</div>
+                ) : jobs.length === 0 ? (
+                  <div className="p-8 text-center text-xs font-mono text-silver-600 bg-white rounded-2xl border border-silver-300">No jobs found.</div>
+                ) : (
+                  jobs.map(j => {
+                    const isSel = selectedJob?.id === j.id;
+                    return (
+                      <div
+                        key={j.id}
+                        onClick={() => handleSelect(j)}
+                        className={`p-4 rounded-2xl cursor-pointer transition-all border ${
+                          isSel ? 'bg-white border-accent-primary shadow-md ring-2 ring-accent-primary/20' : 'bg-white/80 hover:bg-white border-silver-300'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="font-mono text-xs font-bold text-silver-900">{j.agent}</span>
+                          <StatusPill status={j.status} size="sm" />
+                        </div>
+                        <p className="text-xs text-silver-800 line-clamp-2 mb-2 font-medium">{j.goal}</p>
+                        <div className="flex items-center justify-between text-[11px] font-mono text-silver-500 pt-2 border-t border-silver-200">
+                          <span>#{j.id.slice(0, 8)}</span>
+                          <div className="flex items-center gap-3">
+                            <span>{j.steps_count || 0} steps</span>
+                            <span>${Number(j.cost_usd || 0).toFixed(4)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            <div className="lg:col-span-7">
+              {selectedJob ? (
+                <div className="bg-white rounded-2xl border border-silver-300 p-6 shadow-sm space-y-6">
+                  <div className="border-b border-silver-200 pb-5 space-y-3">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-xs font-mono font-bold text-accent-primary">Job #{selectedJob.id}</span>
+                          <StatusPill status={selectedJob.status} />
+                        </div>
+                        <h3 className="text-base font-bold text-silver-900 leading-snug">{selectedJob.goal}</h3>
+                      </div>
+                      {['queued', 'running', 'awaiting_input'].includes(selectedJob.status) && (
+                        <button
+                          onClick={() => handleCancel(selectedJob.id)}
+                          className="px-3 py-1.5 rounded-lg bg-red-50 hover:bg-red-600 text-red-700 hover:text-white border border-red-200 text-xs font-mono font-bold transition-all cursor-pointer"
+                        >
+                          Cancel Job
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 text-xs font-mono">
+                      <div className="p-2.5 rounded-xl bg-silver-50 border border-silver-200">
+                        <span className="text-[10px] text-silver-500 uppercase block">Agent</span>
+                        <span className="font-bold text-silver-900 truncate block">{selectedJob.agent}</span>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-silver-50 border border-silver-200">
+                        <span className="text-[10px] text-silver-500 uppercase block">Tokens</span>
+                        <span className="font-bold text-silver-900 block">{selectedJob.tokens_used || 0}</span>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-silver-50 border border-silver-200">
+                        <span className="text-[10px] text-silver-500 uppercase block">Cost USD</span>
+                        <span className="font-bold text-accent-primary block">${Number(selectedJob.cost_usd || 0).toFixed(4)}</span>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-silver-50 border border-silver-200">
+                        <span className="text-[10px] text-silver-500 uppercase block">Created</span>
+                        <span className="font-bold text-silver-700 truncate block">{new Date(selectedJob.created_at).toLocaleTimeString()}</span>
+                      </div>
+                    </div>
+
+                    {selectedJob.status === 'awaiting_input' && (
+                      <form onSubmit={handleAnswer} className="mt-4 p-4 rounded-xl bg-amber-50 border border-amber-300 space-y-3">
+                        <span className="text-xs font-bold text-amber-900 font-mono block">Agent requested human input:</span>
+                        {selectedJob.pending_question && (
+                          <div className="text-xs text-silver-900 bg-white p-2.5 rounded-lg border border-amber-200 font-mono">
+                            {selectedJob.pending_question}
+                          </div>
+                        )}
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={answerText}
+                            onChange={e => setAnswerText(e.target.value)}
+                            placeholder="Type human answer to resume agent..."
+                            className="flex-1 bg-white px-3 py-1.5 rounded-lg border border-amber-300 text-xs text-silver-900 focus:outline-none focus:border-accent-primary"
+                            required
+                          />
+                          <button
+                            type="submit"
+                            disabled={answering}
+                            className="px-4 py-1.5 rounded-lg bg-accent-primary hover:bg-accent-hover text-white text-xs font-mono font-bold transition-all disabled:opacity-50 cursor-pointer"
+                          >
+                            {answering ? 'Sending...' : 'Send'}
+                          </button>
+                        </div>
+                      </form>
+                    )}
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-extrabold uppercase font-mono tracking-wider text-silver-900">
+                        Execution Step Trace ({steps.length})
+                      </h4>
+                      <button onClick={() => loadSteps(selectedJob.id)} className="text-xs text-accent-primary hover:underline font-mono cursor-pointer">
+                        Refresh steps ↻
+                      </button>
+                    </div>
+
+                    {loadingSteps ? (
+                      <div className="p-6 text-center text-xs font-mono text-silver-600">Loading steps...</div>
+                    ) : steps.length === 0 ? (
+                      <div className="p-6 text-center text-xs font-mono text-silver-600 bg-silver-50 rounded-xl border border-silver-200">
+                        No steps recorded yet.
+                      </div>
+                    ) : (
+                      <div className="space-y-2.5">
+                        {steps.map(st => {
+                          const exp = expandedSteps[st.id];
+                          return (
+                            <div key={st.id} className="rounded-xl bg-silver-50 border border-silver-200 overflow-hidden text-xs">
+                              <div
+                                onClick={() => toggleStep(st.id)}
+                                className="p-3 flex items-center justify-between cursor-pointer hover:bg-silver-100 transition-colors"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span className="w-5 h-5 rounded-md bg-white border border-silver-300 flex items-center justify-center font-mono font-bold text-accent-primary text-[10px]">
+                                    {st.step_number}
+                                  </span>
+                                  {getKindBadge(st.step_kind)}
+                                  <span className="font-mono font-bold text-silver-900">{st.action_name || st.step_kind}</span>
+                                </div>
+                                <div className="flex items-center gap-3 font-mono text-[11px] text-silver-500">
+                                  {st.latency_ms !== undefined && <span>{st.latency_ms}ms</span>}
+                                  {st.tokens_used !== undefined && <span>{st.tokens_used} tok</span>}
+                                  <span>{exp ? '▲' : '▼'}</span>
+                                </div>
+                              </div>
+
+                              {exp && (
+                                <div className="p-3 border-t border-silver-200 space-y-2 bg-white font-mono text-[11px]">
+                                  {st.thought && (
+                                    <div>
+                                      <span className="text-[10px] text-silver-500 uppercase block font-bold">Thought</span>
+                                      <p className="text-silver-800 bg-silver-50 p-2 rounded-lg border border-silver-200 font-sans text-xs whitespace-pre-wrap">{st.thought}</p>
+                                    </div>
+                                  )}
+                                  {st.input_data && Object.keys(st.input_data).length > 0 && (
+                                    <div>
+                                      <span className="text-[10px] text-silver-500 uppercase block font-bold">Input</span>
+                                      <pre className="p-2 rounded-lg bg-slate-900 text-slate-100 overflow-x-auto text-[10px]">{JSON.stringify(st.input_data, null, 2)}</pre>
+                                    </div>
+                                  )}
+                                  {st.output_data && (
+                                    <div>
+                                      <span className="text-[10px] text-silver-500 uppercase block font-bold">Observation Output</span>
+                                      <pre className="p-2 rounded-lg bg-slate-900 text-emerald-300 overflow-x-auto text-[10px]">{typeof st.output_data === 'string' ? st.output_data : JSON.stringify(st.output_data, null, 2)}</pre>
+                                    </div>
+                                  )}
+                                  {st.error && (
+                                    <div className="p-2 rounded-lg bg-red-50 border border-red-200 text-red-700">
+                                      <strong className="block text-[10px]">Error:</strong>
+                                      <span>{st.error}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="h-full min-h-[350px] flex flex-col items-center justify-center p-8 text-center bg-white rounded-2xl border border-silver-300 text-silver-600">
+                  <span className="text-4xl mb-2 opacity-40">💼</span>
+                  <h4 className="font-bold text-sm text-silver-900">No Job Selected</h4>
+                  <p className="text-xs max-w-sm mt-1">Select an autonomous job from the queue on the left to inspect its timeline.</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* New Job Modal */}
+          {isCreateOpen && (
+            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="bg-white border border-silver-300 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+                <div className="flex items-center justify-between border-b border-silver-200 pb-3">
+                  <h3 className="font-bold text-sm text-silver-900">Dispatch New Autonomous Job</h3>
+                  <button onClick={() => setIsCreateOpen(false)} className="text-silver-500 hover:text-silver-900 cursor-pointer">✕</button>
+                </div>
+                <form onSubmit={handleCreate} className="space-y-3.5">
+                  <div>
+                    <label className="block text-[11px] font-mono font-bold text-silver-700 uppercase mb-1">Target Agent</label>
+                    <select
+                      value={newAgent}
+                      onChange={e => setNewAgent(e.target.value)}
+                      className="w-full bg-silver-50 border border-silver-300 rounded-xl px-3 py-2 text-xs text-silver-900 focus:outline-none focus:border-accent-primary font-mono"
+                    >
+                      <option value="research_agent">Research Agent (Deep Search + arXiv)</option>
+                      <option value="career_agent">Career Agent (Resume & Cover Letter)</option>
+                      <option value="growth_agent">Growth Agent (Content Strategy)</option>
+                      <option value="critic_agent">Critic Agent (Audit & Verification)</option>
+                      <option value="github_agent">GitHub Agent (Repos, Issues, PRs)</option>
+                      <option value="email_agent">Email Agent (Inbox & Drafts)</option>
+                      <option value="linkedin_agent">LinkedIn Agent (Profiles & Posts)</option>
+                      <option value="job_agent">Job Search Agent (Boards)</option>
+                      <option value="briefing_agent">Daily Briefing Agent (Executive)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-mono font-bold text-silver-700 uppercase mb-1">Goal / Objective</label>
+                    <textarea
+                      rows={3}
+                      value={newGoal}
+                      onChange={e => setNewGoal(e.target.value)}
+                      placeholder="Directive for autonomous execution loop..."
+                      className="w-full bg-silver-50 border border-silver-300 rounded-xl p-3 text-xs text-silver-900 focus:outline-none focus:border-accent-primary"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-mono font-bold text-silver-700 uppercase mb-1">Priority</label>
+                    <input
+                      type="number"
+                      value={newPriority}
+                      onChange={e => setNewPriority(e.target.value)}
+                      className="w-full bg-silver-50 border border-silver-300 rounded-xl px-3 py-1.5 text-xs text-silver-900 focus:outline-none focus:border-accent-primary font-mono"
+                    />
+                  </div>
+                  <div className="flex justify-end gap-2 pt-2 border-t border-silver-200">
+                    <button type="button" onClick={() => setIsCreateOpen(false)} className="px-4 py-2 rounded-xl bg-silver-100 text-silver-700 text-xs font-mono font-bold cursor-pointer">Cancel</button>
+                    <button type="submit" disabled={creating} className="px-5 py-2 rounded-xl bg-accent-primary hover:bg-accent-hover text-white text-xs font-mono font-bold transition-all disabled:opacity-50 cursor-pointer">
+                      {creating ? 'Enqueuing...' : 'Create Job'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ── VIEW: SCHEDULES CRUD ──
+    function SchedulesView() {
+      const [schedules, setSchedules] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [isModalOpen, setIsModalOpen] = useState(false);
+      const [runningId, setRunningId] = useState(null);
+      const [name, setName] = useState('');
+      const [agent, setAgent] = useState('briefing_agent');
+      const [goal, setGoal] = useState('');
+      const [cronExpr, setCronExpr] = useState('0 9 * * *');
+      const [isActive, setIsActive] = useState(true);
+      const [saving, setSaving] = useState(false);
+
+      const presets = [
+        { label: 'Every 15 Minutes', expr: '*/15 * * * *' },
+        { label: 'Hourly', expr: '0 * * * *' },
+        { label: 'Daily at 9:00 AM', expr: '0 9 * * *' },
+        { label: 'Twice Daily (9 AM & 5 PM)', expr: '0 9,17 * * *' },
+        { label: 'Weekly (Monday 9 AM)', expr: '0 9 * * 1' },
+      ];
+
+      const loadSchedules = async () => {
+        try {
+          const res = await api.getSchedules();
+          setSchedules(res || []);
+        } catch (err) {
+          console.error(err);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      useEffect(() => { loadSchedules(); }, []);
+
+      const handleToggle = async (sch) => {
+        try {
+          await api.updateSchedule(sch.id, { is_active: !sch.is_active });
+          loadSchedules();
+        } catch (err) {
+          alert('Failed to update status: ' + err.message);
+        }
+      };
+
+      const handleRun = async (sch) => {
+        setRunningId(sch.id);
+        try {
+          const res = await api.runSchedule(sch.id);
+          alert(`Triggered Job #${res.job_id.slice(0, 8)} successfully!`);
+          loadSchedules();
+        } catch (err) {
+          alert('Trigger failed: ' + err.message);
+        } finally {
+          setRunningId(null);
+        }
+      };
+
+      const handleDelete = async (id, sName) => {
+        if (!confirm(`Delete schedule "${sName}"?`)) return;
+        try {
+          await api.deleteSchedule(id);
+          loadSchedules();
+        } catch (err) {
+          alert('Delete failed: ' + err.message);
+        }
+      };
+
+      const handleCreate = async (e) => {
+        e.preventDefault();
+        if (!name.trim() || !goal.trim()) return;
+        setSaving(true);
+        try {
+          await api.createSchedule({ name, agent, goal, cron_expr: cronExpr, is_active: isActive });
+          setIsModalOpen(false);
+          setName('');
+          setGoal('');
+          setCronExpr('0 9 * * *');
+          loadSchedules();
+        } catch (err) {
+          alert('Create failed: ' + err.message);
+        } finally {
+          setSaving(false);
+        }
+      };
+
+      return (
+        <div className="space-y-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-silver-500/40 pb-5">
+            <div>
+              <h2 className="text-2xl font-extrabold text-silver-900 tracking-tight flex items-center gap-2.5">
+                <span>📅</span> Recurring Agent Automation Schedules
+              </h2>
+              <p className="text-sm text-silver-800 mt-1">
+                Automate periodic autonomous briefings, repository scans, and research digests on cron cadences.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={loadSchedules} className="px-3.5 py-2 rounded-xl bg-white hover:bg-silver-100 border border-silver-300 text-silver-800 font-bold text-xs transition-all shadow-xs cursor-pointer">
+                <span>↻ Refresh</span>
+              </button>
+              <button onClick={() => setIsModalOpen(true)} className="px-4 py-2 rounded-xl bg-accent-primary hover:bg-accent-hover text-white font-bold text-xs shadow-md transition-all cursor-pointer">
+                <span>+ New Schedule</span>
+              </button>
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="p-12 text-center text-xs font-mono text-silver-600 bg-white rounded-2xl border border-silver-300">Loading schedules...</div>
+          ) : schedules.length === 0 ? (
+            <div className="p-12 text-center text-xs font-mono text-silver-600 bg-white rounded-2xl border border-silver-300">No schedules configured. Click &quot;+ New Schedule&quot; to create one.</div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {schedules.map(sch => (
+                <div key={sch.id} className={`p-5 rounded-2xl border transition-all space-y-3.5 ${sch.is_active ? 'bg-white border-silver-300 shadow-sm' : 'bg-silver-100/70 border-silver-300/60 opacity-80'}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-bold text-sm text-silver-900">{sch.name}</span>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${sch.is_active ? 'bg-emerald-50 text-emerald-800 border border-emerald-300' : 'bg-slate-200 text-slate-700'}`}>
+                          {sch.is_active ? 'ACTIVE' : 'PAUSED'}
+                        </span>
+                      </div>
+                      <span className="text-xs font-mono text-silver-600 block">Agent: {sch.agent}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleToggle(sch)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold border transition-all cursor-pointer ${sch.is_active ? 'bg-silver-100 text-silver-700 border-silver-300 hover:bg-red-50 hover:text-red-700' : 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'}`}
+                      >
+                        {sch.is_active ? 'Pause' : 'Activate'}
+                      </button>
+                      <button onClick={() => handleDelete(sch.id, sch.name)} className="p-1 rounded-lg bg-silver-100 hover:bg-red-50 text-silver-600 hover:text-red-700 border border-silver-300 transition-colors cursor-pointer" title="Delete">
+                        🗑️
+                      </button>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-silver-800 bg-silver-50 p-3 rounded-xl border border-silver-200 leading-relaxed font-sans">{sch.goal}</p>
+
+                  <div className="flex items-center justify-between gap-2 pt-2 border-t border-silver-200 text-xs font-mono">
+                    <span className="px-2.5 py-1 rounded-lg bg-silver-100 text-accent-primary font-bold border border-silver-300">
+                      ⏰ {sch.cron_expr}
+                    </span>
+                    <button
+                      onClick={() => handleRun(sch)}
+                      disabled={runningId === sch.id}
+                      className="px-3.5 py-1.5 rounded-xl bg-accent-primary hover:bg-accent-hover text-white text-xs font-mono font-bold flex items-center gap-1.5 shadow-xs transition-all disabled:opacity-50 cursor-pointer"
+                    >
+                      <span>▶</span>
+                      <span>{runningId === sch.id ? 'Running...' : 'Run Now'}</span>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Modal */}
+          {isModalOpen && (
+            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="bg-white border border-silver-300 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+                <div className="flex items-center justify-between border-b border-silver-200 pb-3">
+                  <h3 className="font-bold text-sm text-silver-900">Create Automation Schedule</h3>
+                  <button onClick={() => setIsModalOpen(false)} className="text-silver-500 hover:text-silver-900 cursor-pointer">✕</button>
+                </div>
+                <form onSubmit={handleCreate} className="space-y-3.5">
+                  <div>
+                    <label className="block text-[11px] font-mono font-bold text-silver-700 uppercase mb-1">Name</label>
+                    <input
+                      type="text"
+                      value={name}
+                      onChange={e => setName(e.target.value)}
+                      placeholder="e.g. Daily Executive Briefing"
+                      className="w-full bg-silver-50 border border-silver-300 rounded-xl px-3 py-2 text-xs text-silver-900 focus:outline-none focus:border-accent-primary"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-mono font-bold text-silver-700 uppercase mb-1">Agent</label>
+                    <select
+                      value={agent}
+                      onChange={e => setAgent(e.target.value)}
+                      className="w-full bg-silver-50 border border-silver-300 rounded-xl px-3 py-2 text-xs text-silver-900 focus:outline-none focus:border-accent-primary font-mono"
+                    >
+                      <option value="briefing_agent">Daily Briefing Agent</option>
+                      <option value="research_agent">Research Agent</option>
+                      <option value="growth_agent">Growth & Content Agent</option>
+                      <option value="critic_agent">Critic Agent</option>
+                      <option value="github_agent">GitHub Agent</option>
+                      <option value="email_agent">Email Agent</option>
+                      <option value="job_agent">Job Search Agent</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-mono font-bold text-silver-700 uppercase mb-1">Goal</label>
+                    <textarea
+                      rows={3}
+                      value={goal}
+                      onChange={e => setGoal(e.target.value)}
+                      placeholder="What should execute when triggered..."
+                      className="w-full bg-silver-50 border border-silver-300 rounded-xl p-3 text-xs text-silver-900 focus:outline-none focus:border-accent-primary"
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="block text-[11px] font-mono font-bold text-silver-700 uppercase">Cadence Presets</label>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {presets.map(p => (
+                        <button
+                          key={p.expr}
+                          type="button"
+                          onClick={() => setCronExpr(p.expr)}
+                          className={`p-2 rounded-xl border text-left text-xs transition-all cursor-pointer ${cronExpr === p.expr ? 'bg-amber-50 border-amber-300 text-amber-900 font-bold' : 'bg-silver-50 border-silver-200 text-silver-700'}`}
+                        >
+                          <div className="text-[11px]">{p.label}</div>
+                          <div className="font-mono text-[10px] text-silver-500">{p.expr}</div>
+                        </button>
+                      ))}
+                    </div>
+                    <input
+                      type="text"
+                      value={cronExpr}
+                      onChange={e => setCronExpr(e.target.value)}
+                      placeholder="* * * * *"
+                      className="w-full bg-silver-50 border border-silver-300 rounded-xl px-3 py-1.5 text-xs font-mono font-bold text-accent-primary focus:outline-none focus:border-accent-primary mt-1"
+                      required
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 pt-1">
+                    <input type="checkbox" id="sch-act-idx" checked={isActive} onChange={e => setIsActive(e.target.checked)} />
+                    <label htmlFor="sch-act-idx" className="text-xs text-silver-800 cursor-pointer">Activate schedule immediately</label>
+                  </div>
+                  <div className="flex justify-end gap-2 pt-2 border-t border-silver-200">
+                    <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 rounded-xl bg-silver-100 text-silver-700 text-xs font-mono font-bold cursor-pointer">Cancel</button>
+                    <button type="submit" disabled={saving} className="px-5 py-2 rounded-xl bg-accent-primary hover:bg-accent-hover text-white text-xs font-mono font-bold transition-all disabled:opacity-50 cursor-pointer">
+                      {saving ? 'Saving...' : 'Create'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ── VIEW: MEMORY & EPISODIC CONTEXT ──
+    function MemoryView() {
+      const [memories, setMemories] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [activeTab, setActiveTab] = useState('pending');
+      const [searchQuery, setSearchQuery] = useState('');
+      const [isCreateOpen, setIsCreateOpen] = useState(false);
+      const [newKind, setNewKind] = useState('fact');
+      const [newKey, setNewKey] = useState('');
+      const [newValue, setNewValue] = useState('');
+      const [saving, setSaving] = useState(false);
+      const [editingItem, setEditingItem] = useState(null);
+      const [editKey, setEditKey] = useState('');
+      const [editValue, setEditValue] = useState('');
+      const [isSummarizeOpen, setIsSummarizeOpen] = useState(false);
+      const [sessionId, setSessionId] = useState('');
+      const [summarizing, setSummarizing] = useState(false);
+
+      const loadMemories = async () => {
+        try {
+          const res = await api.getMemories({ limit: 100 });
+          setMemories(res || []);
+        } catch (err) {
+          console.error(err);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      useEffect(() => { loadMemories(); }, []);
+
+      const handleConfirm = async (id) => {
+        try {
+          await api.confirmMemory(id);
+          loadMemories();
+        } catch (err) {
+          alert('Confirm failed: ' + err.message);
+        }
+      };
+
+      const handleDelete = async (id) => {
+        if (!confirm('Purge this memory item from SQLite and Chroma vector store?')) return;
+        try {
+          await api.deleteMemory(id);
+          loadMemories();
+        } catch (err) {
+          alert('Delete failed: ' + err.message);
+        }
+      };
+
+      const handleCreate = async (e) => {
+        e.preventDefault();
+        if (!newValue.trim()) return;
+        setSaving(true);
+        try {
+          await api.createMemory({ kind: newKind, key: newKey.trim() || undefined, value: newValue.trim(), pending_review: false });
+          setIsCreateOpen(false);
+          setNewKey('');
+          setNewValue('');
+          loadMemories();
+        } catch (err) {
+          alert('Create failed: ' + err.message);
+        } finally {
+          setSaving(false);
+        }
+      };
+
+      const handleEdit = async (e) => {
+        e.preventDefault();
+        if (!editingItem || !editValue.trim()) return;
+        try {
+          await api.updateMemory(editingItem.id, { value: editValue.trim(), key: editKey.trim() || undefined });
+          setEditingItem(null);
+          loadMemories();
+        } catch (err) {
+          alert('Update failed: ' + err.message);
+        }
+      };
+
+      const handleSummarize = async (e) => {
+        e.preventDefault();
+        if (!sessionId.trim()) return;
+        setSummarizing(true);
+        try {
+          await api.summarizeSession(sessionId.trim());
+          setIsSummarizeOpen(false);
+          setSessionId('');
+          loadMemories();
+          alert('Session summarized and indexed into episodic memory!');
+        } catch (err) {
+          alert('Summarize failed: ' + err.message);
+        } finally {
+          setSummarizing(false);
+        }
+      };
+
+      const pendingCount = memories.filter(m => Boolean(m.pending_review)).length;
+
+      const filtered = memories.filter(item => {
+        if (activeTab === 'pending' && !item.pending_review) return false;
+        if (activeTab === 'facts' && (item.pending_review || item.kind === 'episode_summary')) return false;
+        if (activeTab === 'episodes' && (item.pending_review || item.kind !== 'episode_summary')) return false;
+        if (searchQuery.trim()) {
+          const q = searchQuery.toLowerCase();
+          const matchesV = item.value?.toLowerCase().includes(q);
+          const matchesK = item.key ? item.key.toLowerCase().includes(q) : false;
+          return matchesV || matchesK;
+        }
+        return true;
+      });
+
+      return (
+        <div className="space-y-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-silver-500/40 pb-5">
+            <div>
+              <h2 className="text-2xl font-extrabold text-silver-900 tracking-tight flex items-center gap-2.5">
+                <span>🧠</span> Long-Term Semantic & Episodic Memory
+              </h2>
+              <p className="text-sm text-silver-800 mt-1">
+                Contextual facts, user preferences, and episode summaries with human confirmation review gates.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setIsSummarizeOpen(true)} className="px-3.5 py-2 rounded-xl bg-white hover:bg-silver-100 border border-silver-300 text-silver-800 font-bold text-xs transition-all shadow-xs cursor-pointer">
+                <span>✨ Summarize Session</span>
+              </button>
+              <button onClick={() => setIsCreateOpen(true)} className="px-4 py-2 rounded-xl bg-accent-primary hover:bg-accent-hover text-white font-bold text-xs shadow-md transition-all cursor-pointer">
+                <span>+ Add Memory</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-silver-300 text-xs font-mono">
+              <button
+                onClick={() => setActiveTab('pending')}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all cursor-pointer ${activeTab === 'pending' ? 'bg-accent-primary text-white font-bold' : 'text-silver-700 hover:text-silver-950'}`}
+              >
+                <span>Pending Review</span>
+                {pendingCount > 0 && <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-600 text-white">{pendingCount}</span>}
+              </button>
+              <button
+                onClick={() => setActiveTab('facts')}
+                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${activeTab === 'facts' ? 'bg-accent-primary text-white font-bold' : 'text-silver-700 hover:text-silver-950'}`}
+              >
+                Facts & Preferences
+              </button>
+              <button
+                onClick={() => setActiveTab('episodes')}
+                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${activeTab === 'episodes' ? 'bg-accent-primary text-white font-bold' : 'text-silver-700 hover:text-silver-950'}`}
+              >
+                Episode Summaries
+              </button>
+            </div>
+
+            <div className="min-w-[240px]">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="🔍 Search memory..."
+                className="w-full bg-white border border-silver-300 rounded-xl px-3 py-2 text-xs text-silver-900 placeholder:text-silver-500 focus:outline-none focus:border-accent-primary font-mono shadow-xs"
+              />
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="p-12 text-center text-xs font-mono text-silver-600 bg-white rounded-2xl border border-silver-300">Loading memory store...</div>
+          ) : filtered.length === 0 ? (
+            <div className="p-12 text-center text-xs font-mono text-silver-600 bg-white rounded-2xl border border-silver-300">
+              {activeTab === 'pending' ? 'No memories currently pending confirmation.' : 'No memory items matching view.'}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {filtered.map(item => (
+                <div key={item.id} className={`p-5 rounded-2xl border transition-all space-y-3 ${item.pending_review ? 'bg-amber-50/80 border-amber-300 shadow-sm' : 'bg-white border-silver-300 shadow-sm'}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase bg-silver-100 text-silver-800 border border-silver-300">
+                        {item.kind.replace('_', ' ')}
+                      </span>
+                      {item.key && <span className="text-xs font-mono font-bold text-accent-primary">{item.key}</span>}
+                    </div>
+
+                    {item.pending_review ? (
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => handleConfirm(item.id)}
+                          className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-mono font-bold transition-all shadow-xs cursor-pointer"
+                        >
+                          ✓ Confirm
+                        </button>
+                        <button
+                          onClick={() => handleDelete(item.id)}
+                          className="p-1 rounded-lg bg-red-50 hover:bg-red-600 text-red-700 hover:text-white border border-red-200 transition-colors cursor-pointer"
+                          title="Reject"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => { setEditingItem(item); setEditKey(item.key || ''); setEditValue(item.value); }}
+                          className="p-1 rounded-lg bg-silver-100 hover:bg-silver-200 text-silver-700 border border-silver-300 transition-colors cursor-pointer"
+                          title="Edit"
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          onClick={() => handleDelete(item.id)}
+                          className="p-1 rounded-lg bg-silver-100 hover:bg-red-50 text-silver-700 hover:text-red-700 border border-silver-300 transition-colors cursor-pointer"
+                          title="Delete"
+                        >
+                          🗑️
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <p className="text-xs text-silver-800 bg-silver-50 p-3 rounded-xl border border-silver-200 leading-relaxed font-sans">{item.value}</p>
+
+                  <div className="flex items-center justify-between text-[11px] font-mono text-silver-500 pt-1 border-t border-silver-200">
+                    <span>#{item.id.slice(0, 8)}</span>
+                    <span>{new Date(item.created_at).toLocaleDateString()}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Add Memory Modal */}
+          {isCreateOpen && (
+            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="bg-white border border-silver-300 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+                <div className="flex items-center justify-between border-b border-silver-200 pb-3">
+                  <h3 className="font-bold text-sm text-silver-900">Record Memory Item</h3>
+                  <button onClick={() => setIsCreateOpen(false)} className="text-silver-500 hover:text-silver-900 cursor-pointer">✕</button>
+                </div>
+                <form onSubmit={handleCreate} className="space-y-3.5">
+                  <div>
+                    <label className="block text-[11px] font-mono font-bold text-silver-700 uppercase mb-1">Kind</label>
+                    <select
+                      value={newKind}
+                      onChange={e => setNewKind(e.target.value)}
+                      className="w-full bg-silver-50 border border-silver-300 rounded-xl px-3 py-2 text-xs text-silver-900 focus:outline-none focus:border-accent-primary font-mono"
+                    >
+                      <option value="fact">Fact (Knowledge statement)</option>
+                      <option value="preference">Preference (User style/setting)</option>
+                      <option value="episode_summary">Episode Summary</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-mono font-bold text-silver-700 uppercase mb-1">Key / Topic (Optional)</label>
+                    <input
+                      type="text"
+                      value={newKey}
+                      onChange={e => setNewKey(e.target.value)}
+                      placeholder="e.g. target_role, tone_preference"
+                      className="w-full bg-silver-50 border border-silver-300 rounded-xl px-3 py-1.5 text-xs text-silver-900 focus:outline-none focus:border-accent-primary font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-mono font-bold text-silver-700 uppercase mb-1">Value</label>
+                    <textarea
+                      rows={3}
+                      value={newValue}
+                      onChange={e => setNewValue(e.target.value)}
+                      placeholder="Knowledge content for semantic retrieval..."
+                      className="w-full bg-silver-50 border border-silver-300 rounded-xl p-3 text-xs text-silver-900 focus:outline-none focus:border-accent-primary"
+                      required
+                    />
+                  </div>
+                  <div className="flex justify-end gap-2 pt-2 border-t border-silver-200">
+                    <button type="button" onClick={() => setIsCreateOpen(false)} className="px-4 py-2 rounded-xl bg-silver-100 text-silver-700 text-xs font-mono font-bold cursor-pointer">Cancel</button>
+                    <button type="submit" disabled={saving} className="px-5 py-2 rounded-xl bg-accent-primary hover:bg-accent-hover text-white text-xs font-mono font-bold transition-all disabled:opacity-50 cursor-pointer">
+                      {saving ? 'Saving...' : 'Record'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* Edit Memory Modal */}
+          {editingItem && (
+            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="bg-white border border-silver-300 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+                <div className="flex items-center justify-between border-b border-silver-200 pb-3">
+                  <h3 className="font-bold text-sm text-silver-900">Edit Memory Item</h3>
+                  <button onClick={() => setEditingItem(null)} className="text-silver-500 hover:text-silver-900 cursor-pointer">✕</button>
+                </div>
+                <form onSubmit={handleEdit} className="space-y-3.5">
+                  <div>
+                    <label className="block text-[11px] font-mono font-bold text-silver-700 uppercase mb-1">Key</label>
+                    <input
+                      type="text"
+                      value={editKey}
+                      onChange={e => setEditKey(e.target.value)}
+                      className="w-full bg-silver-50 border border-silver-300 rounded-xl px-3 py-1.5 text-xs text-silver-900 focus:outline-none focus:border-accent-primary font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-mono font-bold text-silver-700 uppercase mb-1">Value</label>
+                    <textarea
+                      rows={4}
+                      value={editValue}
+                      onChange={e => setEditValue(e.target.value)}
+                      className="w-full bg-silver-50 border border-silver-300 rounded-xl p-3 text-xs text-silver-900 focus:outline-none focus:border-accent-primary"
+                      required
+                    />
+                  </div>
+                  <div className="flex justify-end gap-2 pt-2 border-t border-silver-200">
+                    <button type="button" onClick={() => setEditingItem(null)} className="px-4 py-2 rounded-xl bg-silver-100 text-silver-700 text-xs font-mono font-bold cursor-pointer">Cancel</button>
+                    <button type="submit" className="px-5 py-2 rounded-xl bg-accent-primary hover:bg-accent-hover text-white text-xs font-mono font-bold cursor-pointer">Save</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* Summarize Session Modal */}
+          {isSummarizeOpen && (
+            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="bg-white border border-silver-300 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+                <div className="flex items-center justify-between border-b border-silver-200 pb-3">
+                  <h3 className="font-bold text-sm text-silver-900">Summarize Conversation Session</h3>
+                  <button onClick={() => setIsSummarizeOpen(false)} className="text-silver-500 hover:text-silver-900 cursor-pointer">✕</button>
+                </div>
+                <form onSubmit={handleSummarize} className="space-y-3.5">
+                  <p className="text-xs text-silver-700 leading-relaxed">
+                    Provide a Conversation ID to extract key insights, decisions, and store them into episodic vector memory.
+                  </p>
+                  <div>
+                    <label className="block text-[11px] font-mono font-bold text-silver-700 uppercase mb-1">Conversation ID</label>
+                    <input
+                      type="text"
+                      value={sessionId}
+                      onChange={e => setSessionId(e.target.value)}
+                      placeholder="e.g. conv-xyz or UUID"
+                      className="w-full bg-silver-50 border border-silver-300 rounded-xl px-3 py-1.5 text-xs text-silver-900 focus:outline-none focus:border-accent-primary font-mono"
+                      required
+                    />
+                  </div>
+                  <div className="flex justify-end gap-2 pt-2 border-t border-silver-200">
+                    <button type="button" onClick={() => setIsSummarizeOpen(false)} className="px-4 py-2 rounded-xl bg-silver-100 text-silver-700 text-xs font-mono font-bold cursor-pointer">Cancel</button>
+                    <button type="submit" disabled={summarizing} className="px-5 py-2 rounded-xl bg-accent-primary hover:bg-accent-hover text-white text-xs font-mono font-bold disabled:opacity-50 cursor-pointer">
+                      {summarizing ? 'Summarizing...' : 'Summarize & Index'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ── VIEW: SETTINGS & GUARDRAILS ──
+    function SettingsView({ silverShade, setSilverShade }) {
+      const [flags, setFlags] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [killSwitchActive, setKillSwitchActive] = useState(false);
+      const [budgetCeiling, setBudgetCeiling] = useState('10.00');
+      const [savingBudget, setSavingBudget] = useState(false);
+      const [togglingKill, setTogglingKill] = useState(false);
+
+      const loadSettings = async () => {
+        try {
+          const res = await api.getSystemFlags();
+          setFlags(res || []);
+          const k = (res || []).find(f => f.key === 'kill_switch');
+          setKillSwitchActive(k ? k.value.toLowerCase() === 'true' : false);
+          const b = (res || []).find(f => f.key === 'daily_budget_usd');
+          if (b) setBudgetCeiling(b.value);
+        } catch (err) {
+          console.error(err);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      useEffect(() => { loadSettings(); }, []);
+
+      const handleToggleKill = async () => {
+        const next = !killSwitchActive;
+        const msg = next
+          ? 'EMERGENCY ACTION: Activating the Kill Switch will immediately abort all running agent jobs and refuse new autonomous dispatches. Proceed?'
+          : 'Deactivate the Kill Switch and resume autonomous agent operations?';
+        if (!confirm(msg)) return;
+        setTogglingKill(true);
+        try {
+          await api.toggleKillSwitch(next);
+          setKillSwitchActive(next);
+          loadSettings();
+        } catch (err) {
+          alert('Toggle failed: ' + err.message);
+        } finally {
+          setTogglingKill(false);
+        }
+      };
+
+      const handleSaveBudget = async (e) => {
+        e.preventDefault();
+        const v = parseFloat(budgetCeiling);
+        if (isNaN(v) || v <= 0) {
+          alert('Please enter a valid positive number.');
+          return;
+        }
+        setSavingBudget(true);
+        try {
+          await api.setDailyBudget(v);
+          loadSettings();
+          alert(`Daily budget ceiling set to $${v.toFixed(2)} USD!`);
+        } catch (err) {
+          alert('Save failed: ' + err.message);
+        } finally {
+          setSavingBudget(false);
+        }
+      };
+
+      return (
+        <div className="space-y-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-silver-500/40 pb-5">
+            <div>
+              <h2 className="text-2xl font-extrabold text-silver-900 tracking-tight flex items-center gap-2.5">
+                <span>⚙️</span> System Guardrails & Executive Settings
+              </h2>
+              <p className="text-sm text-silver-800 mt-1">
+                Emergency circuit controls, daily token expenditure hard stops, and executive aesthetic configurations.
+              </p>
+            </div>
+            <button onClick={loadSettings} className="px-3.5 py-2 rounded-xl bg-white hover:bg-silver-100 border border-silver-300 text-silver-800 font-bold text-xs transition-all shadow-xs cursor-pointer">
+              <span>↻ Refresh</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Kill Switch Card */}
+            <div className={`p-6 rounded-2xl border transition-all space-y-4 ${killSwitchActive ? 'bg-red-50 border-red-300 shadow-md ring-2 ring-red-400/40' : 'bg-white border-silver-300 shadow-sm'}`}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-silver-900 font-mono">Emergency Kill Switch</h3>
+                  <span className="text-[11px] text-silver-600 block">Global 1-Step Abort Guard</span>
+                </div>
+                <span className={`px-2.5 py-1 rounded-full text-[10px] font-mono font-bold ${killSwitchActive ? 'bg-red-600 text-white animate-pulse' : 'bg-emerald-50 text-emerald-800 border border-emerald-300'}`}>
+                  {killSwitchActive ? 'ACTIVE / HALTED' : 'NORMAL / INACTIVE'}
+                </span>
+              </div>
+              <p className="text-xs text-silver-700 leading-relaxed">
+                When activated, every autonomous loop checks this flag before each tool call and aborts immediately. Workers refuse newly claimed jobs.
+              </p>
+              <button
+                onClick={handleToggleKill}
+                disabled={togglingKill}
+                className={`w-full py-2.5 rounded-xl font-mono text-xs font-bold transition-all shadow-sm cursor-pointer ${killSwitchActive ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-red-600 hover:bg-red-700 text-white'}`}
+              >
+                {killSwitchActive ? 'Deactivate Kill Switch & Resume' : 'Activate Emergency Kill Switch'}
+              </button>
+            </div>
+
+            {/* Daily Budget Card */}
+            <div className="bg-white border border-silver-300 rounded-2xl p-6 shadow-sm space-y-4">
+              <div>
+                <h3 className="text-sm font-bold text-silver-900 font-mono">Daily Budget Ceiling</h3>
+                <span className="text-[11px] text-silver-600 block">LLM Spend Hard Stop</span>
+              </div>
+              <p className="text-xs text-silver-700 leading-relaxed">
+                Sets the daily expenditure ceiling across all Groq and OpenAI model inference calls. Once breached, subsequent steps abort with BudgetExceededError.
+              </p>
+              <form onSubmit={handleSaveBudget} className="flex gap-2">
+                <div className="relative flex-1">
+                  <span className="absolute left-3 top-2 text-xs font-mono text-silver-500">$</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.10"
+                    value={budgetCeiling}
+                    onChange={e => setBudgetCeiling(e.target.value)}
+                    className="w-full bg-silver-50 border border-silver-300 rounded-xl pl-7 pr-3 py-1.5 text-xs font-mono font-bold text-accent-primary focus:outline-none focus:border-accent-primary"
+                    required
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={savingBudget}
+                  className="px-4 py-1.5 rounded-xl bg-accent-primary hover:bg-accent-hover text-white text-xs font-mono font-bold transition-all disabled:opacity-50 cursor-pointer"
+                >
+                  {savingBudget ? 'Saving...' : 'Set Budget'}
+                </button>
+              </form>
+            </div>
+          </div>
+
+          {/* System Flags Table */}
+          <div className="bg-white rounded-2xl border border-silver-300 p-6 shadow-sm space-y-4">
+            <h3 className="font-bold text-xs text-silver-900 font-mono uppercase tracking-wider">
+              Active System Flags Database ({flags.length})
+            </h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs font-mono">
+                <thead>
+                  <tr className="border-b border-silver-300 text-silver-600">
+                    <th className="p-2">Flag Key</th>
+                    <th className="p-2">Value</th>
+                    <th className="p-2 text-right">Updated At</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-silver-200">
+                  {flags.map(f => (
+                    <tr key={f.key}>
+                      <td className="p-2 font-bold text-accent-primary">{f.key}</td>
+                      <td className="p-2 text-silver-900">{f.value}</td>
+                      <td className="p-2 text-right text-silver-600">{new Date(f.updated_at).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Theme Selector */}
+          <div className="bg-white rounded-2xl border border-silver-300 p-6 shadow-sm space-y-4">
+            <h3 className="font-bold text-xs text-silver-900 font-mono uppercase tracking-wider">
+              Metallic Silver Aesthetic Palette
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {[
+                { id: 'light', label: 'Silver Light', hex: '#DCE2E9', desc: 'Soft morning tone' },
+                { id: 'medium', label: 'Metallic Silver', hex: '#B0B8C4', desc: 'True metallic control plane' },
+                { id: 'deep', label: 'Deep Silver', hex: '#96A0AF', desc: 'High-contrast executive' }
+              ].map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => setSilverShade(t.id)}
+                  className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${silverShade === t.id ? 'bg-amber-50/50 border-accent-primary shadow-xs' : 'bg-silver-50 border-silver-200 hover:border-silver-300'}`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-bold text-xs text-silver-900">{t.label}</span>
+                    <span className="w-4 h-4 rounded-full border border-black/20" style={{ backgroundColor: t.hex }} />
+                  </div>
+                  <p className="text-[10px] text-silver-600">{t.desc}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     // ── MAIN SHELL / GLOBAL LAYOUT ──
     function App() {
       const [tab, setTab] = useState('dispatch');
       const [runId, setRunId] = useState(null);
       const [pendingCount, setPendingCount] = useState(0);
       const [circuitState, setCircuitState] = useState('CLOSED');
+      const [connectionStatus, setConnectionStatus] = useState('connected');
       
       // Silver shade palette options
       const [silverShade, setSilverShade] = useState('medium'); // 'light' (#DCE2E9) | 'medium' (#B0B8C4) | 'deep' (#96A0AF)
@@ -1810,11 +3331,20 @@
       useEffect(() => {
         const bgColors = {
           light: '#DCE2E9',
-          medium: '#B0B8C4', // True metallic silver default
+          medium: '#B0B8C4',
           deep: '#96A0AF'
         };
         document.body.style.backgroundColor = bgColors[silverShade] || '#B0B8C4';
       }, [silverShade]);
+
+      // Subscribe to real-time SSE stream for connection status
+      useEffect(() => {
+        const unsub = api.subscribeJobEvents({
+          onEvent: () => {},
+          onStatusChange: (status) => setConnectionStatus(status)
+        });
+        return () => unsub();
+      }, []);
 
       useEffect(() => {
         const poll = async () => {
@@ -1844,10 +3374,14 @@
       }, [tab]);
 
       const navItems = [
-        { id: 'dispatch', label: 'Dispatch Chat', icon: '💬' },
+        { id: 'dispatch', label: 'Dispatch', icon: '💬' },
+        { id: 'jobs', label: 'Jobs Timeline', icon: '💼' },
+        { id: 'schedules', label: 'Schedules', icon: '📅' },
+        { id: 'memory', label: 'Memory', icon: '🧠' },
         { id: 'pipelines', label: 'Pipelines', icon: '🚀' },
         { id: 'approvals', label: 'Approvals', icon: '🛡️', badge: pendingCount > 0 ? pendingCount : null },
         { id: 'eval', label: 'Benchmark', icon: '📊' },
+        { id: 'settings', label: 'Settings', icon: '⚙️' },
         { id: 'diagnostics', label: 'Diagnostics', icon: '🩺' },
       ];
 
@@ -1888,7 +3422,7 @@
                     <button
                       key={item.id}
                       onClick={() => { setTab(item.id); if (item.id === 'pipelines') setRunId(null); }}
-                      className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                         active ? 'bg-accent-primary text-white shadow-xs font-bold' : 'text-silver-700 hover:text-silver-950 hover:bg-white/60'
                       }`}
                     >
@@ -1907,6 +3441,9 @@
 
             {/* Right Health, Tone Selector & Circuit Capsule */}
             <div className="flex items-center gap-3">
+              {/* Connection Status Badge */}
+              <ConnectionStatusBadge status={connectionStatus} />
+
               {/* Silver Shade Selector */}
               <div className="hidden lg:flex items-center gap-1 px-2 py-1 rounded-xl bg-silver-100 border border-silver-300 text-[11px] font-mono">
                 <span className="text-silver-600 mr-1">Silver:</span>
@@ -1918,7 +3455,7 @@
                   <button
                     key={s.id}
                     onClick={() => setSilverShade(s.id)}
-                    className={`px-2 py-0.5 rounded-md transition-all ${
+                    className={`px-2 py-0.5 rounded-md transition-all cursor-pointer ${
                       silverShade === s.id
                         ? 'bg-white text-silver-900 font-bold shadow-xs'
                         : 'text-silver-600 hover:text-silver-900'
@@ -1960,7 +3497,7 @@
               <button
                 key={item.id}
                 onClick={() => { setTab(item.id); if (item.id === 'pipelines') setRunId(null); }}
-                className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer ${
                   tab === item.id ? 'bg-accent-primary text-white' : 'text-silver-700'
                 }`}
               >
@@ -1973,10 +3510,14 @@
           {/* Main Stage */}
           <main className={`w-full mx-auto ${tab === 'dispatch' ? 'flex-1 min-h-0 max-w-7xl px-4 md:px-6 py-2.5 flex flex-col overflow-hidden' : 'flex-1 max-w-7xl p-6 md:p-8'}`}>
             {tab === 'dispatch' && <DispatchView />}
+            {tab === 'jobs' && <JobsView />}
+            {tab === 'schedules' && <SchedulesView />}
+            {tab === 'memory' && <MemoryView />}
             {tab === 'pipelines' && <PipelinesView onSelectRun={id => { setRunId(id); setTab('runs'); }} />}
             {tab === 'runs' && (runId ? <RunDetailView runId={runId} onBack={() => setTab('pipelines')} /> : <PipelinesView onSelectRun={id => { setRunId(id); setTab('runs'); }} />)}
             {tab === 'approvals' && <ApprovalsView />}
             {tab === 'eval' && <EvalView />}
+            {tab === 'settings' && <SettingsView silverShade={silverShade} setSilverShade={setSilverShade} />}
             {tab === 'diagnostics' && <DiagnosticsView />}
           </main>
 

@@ -1,19 +1,20 @@
 /**
  * frontend/src/pages/EvalPage.tsx
- * Router accuracy evaluation dashboard, confusion matrix heatmap, per-agent metrics, and trend chart.
+ * Router accuracy evaluation dashboard, confusion matrix heatmap, workflow success rate, and daily cost.
  */
 
 import React, { useEffect, useState } from 'react';
 import { api } from '../api/client';
-import { EvalResult, EvalSummary } from '../types/api';
+import { EvalResult, EvalSummary, JobRecord } from '../types/api';
 import { ConfusionMatrixHeatmap } from '../components/ConfusionMatrixHeatmap';
 import { AgentPrecisionRecallTable } from '../components/AgentPrecisionRecallTable';
 import { EvalTrendChart } from '../components/EvalTrendChart';
-import { BarChart3, RefreshCw, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { BarChart3, RefreshCw, AlertTriangle, CheckCircle2, TrendingUp, Coins, CheckCircle, Activity } from 'lucide-react';
 
 export const EvalPage: React.FC = () => {
   const [evalData, setEvalData] = useState<EvalResult | null>(null);
   const [history, setHistory] = useState<EvalSummary[]>([]);
+  const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isTriggering, setIsTriggering] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -21,15 +22,19 @@ export const EvalPage: React.FC = () => {
   const fetchEval = async () => {
     setIsLoading(true);
     try {
-      const [latest, hist] = await Promise.all([
+      const [latest, hist, jobsRes] = await Promise.all([
         api.getLatestEval().catch(() => null),
         api.getEvalHistory().catch(() => ({ runs: [], total: 0 })),
+        api.getJobs({ limit: 100 }).catch(() => ({ items: [], total: 0, limit: 100, offset: 0 })),
       ]);
       if (latest && 'metrics' in latest) {
         setEvalData(latest);
       }
       if (hist && hist.runs) {
         setHistory(hist.runs);
+      }
+      if (jobsRes && jobsRes.items) {
+        setJobs(jobsRes.items);
       }
       setError(null);
     } catch (err: any) {
@@ -55,23 +60,31 @@ export const EvalPage: React.FC = () => {
     }
   };
 
+  // Compute workflow success rate & total daily cost from jobs
+  const completedJobs = jobs.filter((j) => ['succeeded', 'failed'].includes(j.status));
+  const succeededJobs = jobs.filter((j) => j.status === 'succeeded');
+  const workflowSuccessRate = completedJobs.length > 0
+    ? (succeededJobs.length / completedJobs.length) * 100
+    : 100.0;
+  const totalCostUsd = jobs.reduce((acc, j) => acc + (Number(j.cost_usd) || 0), 0);
+
   return (
-    <div className="space-y-6 max-w-4xl mx-auto">
+    <div className="space-y-6 max-w-5xl mx-auto">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-black text-text-primary flex items-center gap-2.5">
             <BarChart3 className="w-6 h-6 text-accent-primary" />
-            Router Accuracy &amp; Benchmark Evaluation
+            Router Accuracy &amp; System Performance Telemetry
           </h2>
           <p className="text-sm text-text-muted mt-1">
-            Empirical benchmark metrics against 27 ground-truth commands and classification boundaries.
+            Empirical benchmark metrics against 27 ground-truth commands, workflow completion rate, and aggregate inference costs.
           </p>
         </div>
 
         <button
           onClick={handleTriggerEval}
           disabled={isTriggering}
-          className="px-5 py-2.5 bg-accent-primary hover:bg-[#ffa343] text-text-onLight font-bold text-xs rounded-pill flex items-center gap-2 transition-all shadow-md active:scale-95 disabled:opacity-50 self-start sm:self-auto"
+          className="px-5 py-2.5 bg-accent-primary hover:brightness-105 text-text-onLight font-bold text-xs rounded-pill flex items-center gap-2 transition-all shadow-md active:scale-95 disabled:opacity-50 self-start sm:self-auto"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${isTriggering ? 'animate-spin' : ''}`} />
           <span>{isTriggering ? 'Running Benchmark...' : 'Run Benchmark Now'}</span>
@@ -96,8 +109,8 @@ export const EvalPage: React.FC = () => {
             </div>
           )}
 
-          {/* Headline Stats Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {/* Headline Stats Cards: Accuracy, Success Rate, Daily Cost, Benchmark */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="bg-surface-primary rounded-2xl p-5 border border-surface-muted/20 shadow-lg">
               <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">
                 Overall Accuracy
@@ -106,36 +119,43 @@ export const EvalPage: React.FC = () => {
                 {(evalData.metrics.accuracy * 100).toFixed(1)}%
               </div>
               <span className="text-xs text-text-muted mt-1 block">
-                {evalData.metrics.correct} of {evalData.metrics.total} commands correctly routed
+                {evalData.metrics.correct} / {evalData.metrics.total} commands correct
               </span>
             </div>
 
             <div className="bg-surface-primary rounded-2xl p-5 border border-surface-muted/20 shadow-lg">
               <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">
-                Benchmark Dataset
+                Workflow Success
+              </span>
+              <div className="text-3xl font-black text-emerald-400 mt-1 tabular-nums font-mono">
+                {workflowSuccessRate.toFixed(1)}%
+              </div>
+              <span className="text-xs text-text-muted mt-1 block">
+                {succeededJobs.length} / {completedJobs.length || 1} completed jobs
+              </span>
+            </div>
+
+            <div className="bg-surface-primary rounded-2xl p-5 border border-surface-muted/20 shadow-lg">
+              <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">
+                Daily Token Cost
+              </span>
+              <div className="text-3xl font-black text-accent-primary mt-1 tabular-nums font-mono">
+                ${totalCostUsd.toFixed(4)}
+              </div>
+              <span className="text-xs text-text-muted mt-1 block">
+                Aggregated inference spend
+              </span>
+            </div>
+
+            <div className="bg-surface-primary rounded-2xl p-5 border border-surface-muted/20 shadow-lg">
+              <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">
+                Benchmark Suite
               </span>
               <div className="text-xl font-bold text-text-primary mt-2 font-mono">
                 fixed_set.json
               </div>
               <span className="text-xs text-text-muted mt-1 block">
-                27 curated commands with 4 ambiguous edge-cases
-              </span>
-            </div>
-
-            <div className="bg-surface-primary rounded-2xl p-5 border border-surface-muted/20 shadow-lg">
-              <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">
-                Last Evaluated
-              </span>
-              <div className="text-sm font-bold text-text-primary mt-2 font-mono">
-                {new Date(evalData.run_at).toLocaleDateString([], {
-                  month: 'short',
-                  day: 'numeric',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}
-              </div>
-              <span className="text-xs text-state-success flex items-center gap-1 mt-1 font-semibold">
-                <CheckCircle2 className="w-3.5 h-3.5" /> Prompt Hash Verified
+                27 curated commands
               </span>
             </div>
           </div>

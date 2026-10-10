@@ -25,10 +25,12 @@ export interface ApprovalRecord {
   id: string;
   action_type: string;
   payload_json: string;
-  status: 'pending' | 'approved' | 'rejected' | 'executing' | 'executed' | 'expired';
+  status: 'pending' | 'approved' | 'rejected' | 'executing' | 'executed' | 'expired' | 'superseded';
   created_at: string;
   expires_at?: string | null;
   executed_at?: string | null;
+  target?: string | null;
+  payload_hash?: string | null;
 }
 
 export interface PipelineStepRecord {
@@ -96,4 +98,96 @@ export interface EvalSummary {
   prompt_hash: string;
   stale: boolean;
   results_file?: string | null;
+}
+
+// ── Phase 8: Autonomous Jobs, Steps, Roster, Memory, Schedules & System Types ──
+
+export interface JobRecord {
+  id: string;
+  thread_id: string;
+  parent_job_id?: string | null;
+  session_id?: string | null;
+  schedule_id?: string | null;
+  agent: string;
+  goal: string;
+  params?: Record<string, any>;
+  status: 'queued' | 'running' | 'awaiting_approval' | 'awaiting_input' | 'succeeded' | 'failed' | 'cancelled' | 'expired';
+  priority: number;
+  attempts: number;
+  max_attempts: number;
+  not_before?: string | null;
+  claimed_by?: string | null;
+  claimed_at?: string | null;
+  heartbeat_at?: string | null;
+  step_count: number;
+  max_steps: number;
+  token_budget: number;
+  tokens_used: number;
+  cost_usd: number;
+  result_json?: string | null;
+  error?: string | null;
+  created_at: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+}
+
+export interface JobStepRecord {
+  id: string;
+  job_id: string;
+  idx: number;
+  kind: 'llm' | 'tool' | 'propose' | 'note' | 'error';
+  name?: string | null;
+  input_json?: string | null;
+  output_json?: string | null;
+  tokens_in?: number | null;
+  tokens_out?: number | null;
+  cost_usd?: number | null;
+  duration_ms?: number | null;
+  ok: boolean;
+  created_at: string;
+}
+
+export interface AgentInfo {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  free_capabilities: string[];
+  gated_capabilities: string[];
+  is_active: boolean;
+  status: 'healthy' | 'degraded' | 'disabled';
+  allowed_tools: string[];
+  circuit_breakers: Record<string, string>;
+}
+
+export interface MemoryItemResponse {
+  id: string;
+  kind: 'fact' | 'preference' | 'episode_summary';
+  key?: string | null;
+  value: string;
+  source_session_id?: string | null;
+  source_message_id?: string | null;
+  pending_review: boolean;
+  created_at: string;
+  updated_at: string;
+  deleted: boolean;
+}
+
+export interface ScheduleRecord {
+  id: string;
+  name: string;
+  agent: string;
+  goal: string;
+  cron_expr: string;
+  is_active: boolean;
+  last_run_at?: string | null;
+  next_run_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SystemFlagRecord {
+  key: string;
+  value: string;
+  updated_at: string;
 }
