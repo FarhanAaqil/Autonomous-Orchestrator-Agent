@@ -103,3 +103,25 @@ def test_sse_event_hub_and_last_event_id_replay():
     last_item = event_hub._history[-1]
     assert last_item[0] == current_counter
     assert f"id: {current_counter}" in last_item[1]
+
+
+@pytest.mark.anyio
+async def test_sse_endpoint_query_and_header_reconnect():
+    from orchestrator_core.routes.jobs import stream_job_events
+
+    event_hub.publish("job.created", {"job_id": "test_job_sse", "status": "queued"})
+    eid = event_hub._counter
+
+    # 1. Query parameter reconnection
+    resp_query = await stream_job_events(last_event_id=None, last_event_id_query=str(eid - 1))
+    msg_query = await resp_query.body_iterator.__anext__()
+    assert f"id: {eid}" in msg_query
+    await resp_query.body_iterator.aclose()
+
+    # 2. Header reconnection
+    resp_header = await stream_job_events(last_event_id=str(eid - 1), last_event_id_query=None)
+    msg_header = await resp_header.body_iterator.__anext__()
+    assert f"id: {eid}" in msg_header
+    await resp_header.body_iterator.aclose()
+
+

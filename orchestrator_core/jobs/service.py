@@ -246,6 +246,11 @@ class JobService:
         # Reset claimed_by and heartbeat when releasing back to queue
         new_claimed_by = None if target_status == "queued" else job.claimed_by
         new_heartbeat = None if target_status == "queued" else job.heartbeat_at
+        new_heartbeat_str = (
+            new_heartbeat.isoformat()
+            if isinstance(new_heartbeat, datetime)
+            else (str(new_heartbeat) if new_heartbeat is not None else None)
+        )
 
         with db:
             db.execute(
@@ -266,7 +271,7 @@ class JobService:
                     error,
                     not_before_str,
                     new_claimed_by,
-                    new_heartbeat,
+                    new_heartbeat_str,
                     finished_at,
                     job_id,
                 ),

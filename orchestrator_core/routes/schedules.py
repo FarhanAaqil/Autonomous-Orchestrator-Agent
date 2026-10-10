@@ -202,6 +202,7 @@ async def delete_schedule(
 
 
 @router.post("/{schedule_id}/run")
+@router.post("/{schedule_id}/run-now")
 async def run_schedule_now(
     schedule_id: str,
     db: sqlite3.Connection = Depends(get_db_connection),

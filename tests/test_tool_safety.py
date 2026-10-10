@@ -81,7 +81,7 @@ def test_registry_blocks_exec_capability():
 
 def test_default_registry_contains_zero_exec_tools():
     """Verify that default_registry contains only READ and PROPOSE tools."""
-    assert len(default_registry.all_specs()) == 7
+    assert len(default_registry.all_specs()) == 8
     for name, spec in default_registry.all_specs().items():
         assert spec.capability in (Capability.READ, Capability.PROPOSE), (
             f"Tool {name} has forbidden capability {spec.capability}"
@@ -97,10 +97,10 @@ def test_default_registry_contains_zero_exec_tools():
         ("growth_content_agent", {"google_search", "fetch_page", "propose_action"}),
         ("github_agent", {"github_read", "propose_action"}),
         ("email_agent", {"email_read", "propose_action"}),
-        ("linkedin_agent", {"ddg_search", "fetch_page", "propose_action"}),
+        ("linkedin_agent", {"ddg_search", "fetch_page", "browser_read", "propose_action"}),
         ("info_agent", {"google_search", "fetch_page", "ddg_search"}),
         ("general_chat_agent", {"ddg_search"}),
-        ("orchestrator", {"google_search", "fetch_page", "arxiv_search", "ddg_search", "github_read", "email_read", "propose_action"}),
+        ("orchestrator", {"google_search", "fetch_page", "arxiv_search", "ddg_search", "github_read", "email_read", "browser_read", "propose_action"}),
     ],
 )
 def test_registry_for_agent_allowlists(agent_name, expected_tools):

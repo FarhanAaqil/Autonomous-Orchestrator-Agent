@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  browser_sandbox:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: orchestrator/browser-sandbox:latest
+    container_name: orchestrator_browser_sandbox
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8888:8888"
+    user: "1001:1001"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=512m
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1024M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    environment:
+      - PORT=8888
+      - PYTHONUNBUFFERED=1
+    networks:
+      - sandbox_net
+
+networks:
+  sandbox_net:
+    driver: bridge
