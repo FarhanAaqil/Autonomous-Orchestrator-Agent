@@ -6,6 +6,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.0] - 2026-10-11
+
+### Full Autonomous Release (Phases 1–10 Complete)
+
+#### Phase 1: FastAPI Composition Root & Persistence
+- Modular FastAPI engine with WAL mode and foreign-key enforced SQLite schema.
+- Structured request logging middleware, unified error handling, and `/health` diagnostic endpoints.
+
+#### Phase 2: Router Evaluation Harness & CI Gate
+- Expanded router evaluation harness to 209 benchmark test cases across dev and test splits.
+- Enforced automated CI gate in GitHub Actions guaranteeing ≥90% accuracy and F1 score ≥0.80 across all 9 agents (achieved 100.0% frozen test split accuracy).
+
+#### Phase 3: Approval Gate Cryptographic Hardening (SEC-01..08)
+- Zero-payload execution contract (`execute_approved(approval_id)`).
+- SHA-256 canonical payload hash binding (`compute_payload_hash()`).
+- Server-side HMAC-SHA256 signature verification (`EXECUTOR_HMAC_SECRET`).
+- Atomic Compare-And-Set (CAS) concurrency enforcement and unique `idempotency_key` deduplication.
+- TOCTOU protection returning HTTP 409 Conflict if payload changes before approval.
+- Edit-and-supersede proposal lifecycle and append-only audit trail logging.
+
+#### Phase 4: AST Safety Guards & CI Enforcements
+- AST analysis enforcing zero imports from `experimental/`.
+- Zero SDK leakage outside `approval_gate.py` across all agents and tools.
+- Verification that all read tools strictly use idempotent GET requests.
+
+#### Phase 5: Autonomy Engine & Persistent Job Queue
+- Persistent SQLite job queue with atomic CAS claiming (`claimed_by`, `claimed_at`).
+- Granular step recording in `job_steps` tracking LLM thoughts, tool calls, token usage, duration, and output.
+- ReAct loop with repeat loop detection (aborting on 5× identical calls), emergency kill switch, token/step limits, and wall-clock timeouts.
+- Background worker with heartbeat leases and exponential backoff zombie job reaper.
+
+#### Phase 6: Capability-Tagged Tool Registry & Full Agent Roster
+- Explicit capability taxonomy (`READ`, `PROPOSE`, `EXEC`), strictly excluding `EXEC` tools from agents.
+- 9 fully wired agents: `career_agent`, `research_agent`, `growth_content_agent`, `critic_agent`, `info_agent`, `email_agent`, `github_agent`, `linkedin_agent`, `general_chat_agent`.
+- SSRF-protected shared HTTP client blocking private IP subnets and cloud metadata services.
+- Circuit breakers protecting fragile external scrapers and search APIs.
+
+#### Phase 7: Episodic & Semantic Memory Engine
+- Multi-tier memory model: semantic facts/preferences and episodic conversation summaries.
+- Owner review queue (`pending_review=1`) for auto-extracted facts before permanent promotion.
+- Token-budgeted context retrieval (`get_context_slice()`) with cosine similarity ranking.
+- Complete forget flow with soft-deletion and ChromaDB vector embedding purge.
+
+#### Phase 8: Executive Control Plane Dashboard
+- Production-grade React 18 single-page application with 10 integrated views: Dispatch/Chat, Jobs Timeline, Approvals Gate, Schedules, Memory Management, Pipelines, Benchmark, Settings, and Diagnostics.
+- Server-Sent Events (SSE) streaming with reconnection replay via `Last-Event-ID` and query parameter fallback.
+- Sticky-bottom intelligent autoscroll with "Jump to latest ↓" indicators.
+
+#### Phase 9: Playwright Browser Sandbox
+- Containerized Playwright sandbox running as unprivileged user with read-only root and ephemeral contexts.
+- Strict scheme filtering and SSRF isolation blocking private networks and metadata IPs.
+- Untrusted XML boundary tagging (`<untrusted_data>`) with adversarial tag breakout neutralization.
+
+#### Phase 10: Hardening, Disaster Recovery & Release
+- Atomic zero-downtime SQLite and ChromaDB backup and restore CLI (`scripts/backup_restore.py`) with RPO ≤ 1h and RTO < 30s.
+- High-concurrency soak testing with 100 jobs, 5 concurrent workers, simulated crashes, and reaper recovery verifying zero duplicate executions.
+- Daily budget dollar ceilings with automatic job abort and `system.budget_alarm` alerts.
+- Formal security audit against Section 10 threat checklist with 0 npm/pip vulnerabilities.
+- Complete Architecture Decision Records (`docs/adr/0001` through `0004`) and Operations Runbook (`docs/runbook.md`).
+
+---
+
 ## [2.0.0-alpha] - 2026-09-19
 
 ### Phase 0 — Safety Baseline & Environment Sanitization
