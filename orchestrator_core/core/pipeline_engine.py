@@ -120,7 +120,24 @@ def run_pipeline(
 
         elif pipeline_name == "apply":
             # Career agent handles cover letters + tailoring (absorbed from JobAgent)
-            _run_step(db, run_id, 1, "career_agent", request.command, career_agent.handle)
+            step_out = _run_step(db, run_id, 1, "career_agent", request.command, career_agent.handle)
+            res = step_out.get("result")
+            import re
+            m = re.search(r"[\w\.-]+@[\w\.-]+\.\w+", request.command)
+            if m:
+                to_email = m.group(0)
+                from orchestrator_core.core.approval_gate import request_approval
+                out_txt = getattr(res, "output", str(res))
+                request_approval(
+                    action_type="send_email",
+                    payload={
+                        "to_email": to_email,
+                        "subject": "Application & Cover Letter — Farhan Aaqil",
+                        "body": out_txt,
+                        "run_id": run_id,
+                    },
+                    db=db,
+                )
 
         elif pipeline_name == "publish":
             # Growth agent generates content — never publishes directly

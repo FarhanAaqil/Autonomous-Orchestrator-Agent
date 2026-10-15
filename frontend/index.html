@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Orchestrator Agent — Executive Control Plane</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23EEE9DF'/%3E%3Cpath d='M 28.09 74.92 A 31 31 0 1 1 68.32 78.10' fill='none' stroke='%237E939C' stroke-width='6' stroke-linecap='round'/%3E%3Ccircle cx='71.92' cy='74.92' r='5.5' fill='%23FFB162'/%3E%3C/svg%3E" />
+  <link rel="icon" type="image/png" href="/static/logo.png" />
+  <link rel="apple-touch-icon" href="/static/logo.png" />
   
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -820,8 +820,8 @@
 
       const handleDeleteConversation = async (cid, e) => {
         if (e && e.stopPropagation) e.stopPropagation();
+        if (e && e.preventDefault) e.preventDefault();
         if (!cid) return;
-        if (!confirm("Are you sure you want to delete this conversation thread?")) return;
         try {
           await api.deleteConversation(cid);
           setConversations(prev => prev.filter(c => c.id !== cid));
@@ -829,6 +829,7 @@
             startNewChat();
           }
         } catch (err) {
+          console.error("Delete conversation failed:", err);
           alert("Could not delete conversation: " + err.message);
         }
       };
@@ -1083,11 +1084,12 @@
                           </div>
 
                           <button
+                            type="button"
                             onClick={e => handleDeleteConversation(c.id, e)}
                             title="Delete thread"
-                            className="text-silver-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-lg transition-all flex items-center justify-center flex-shrink-0"
+                            className="text-silver-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-lg transition-all flex items-center justify-center flex-shrink-0 cursor-pointer z-10"
                           >
-                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <svg className="w-3.5 h-3.5 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                             </svg>
                           </button>
@@ -1183,17 +1185,30 @@
                   <span>{messages.length} msgs</span>
                   {conversationId && (
                     <button
-                      onClick={() => handleDeleteConversation(conversationId)}
-                      className="text-red-600 hover:text-red-700 hover:bg-red-100/80 bg-red-50 border border-red-200 px-2 py-0.5 rounded-lg font-bold flex items-center gap-1 transition-all"
-                      title="Delete this conversation thread"
+                      type="button"
+                      onClick={(e) => handleDeleteConversation(conversationId, e)}
+                      className="text-red-600 hover:text-red-700 hover:bg-red-100/80 bg-red-50 border border-red-200 px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 transition-all cursor-pointer"
+                      title="Delete this entire conversation thread"
                     >
                       <span>🗑️</span>
                       <span>Delete Thread</span>
                     </button>
                   )}
                   <button
+                    type="button"
+                    onClick={() => {
+                      setMessages([defaultWelcome]);
+                    }}
+                    className="text-silver-700 hover:text-red-600 hover:bg-red-50 border border-silver-300 px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 transition-all cursor-pointer"
+                    title="Clear message display"
+                  >
+                    <span>🧹</span>
+                    <span>Clear Messages</span>
+                  </button>
+                  <button
+                    type="button"
                     onClick={startNewChat}
-                    className="text-silver-700 hover:text-silver-950 hover:bg-silver-100 border border-silver-300 px-2 py-0.5 rounded-lg font-bold flex items-center gap-1 transition-all"
+                    className="text-silver-700 hover:text-silver-950 hover:bg-silver-100 border border-silver-300 px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 transition-all cursor-pointer"
                     title="Start fresh new session"
                   >
                     <span>+ New Chat</span>
@@ -1331,6 +1346,26 @@
                             className="prose-output"
                             dangerouslySetInnerHTML={{ __html: renderFormattedMarkdown(m.text) }}
                           />
+                        )}
+
+                        {m.text && (m.text.includes('Requires Human Approval') || m.text.includes('Approval Gate')) && !m.text.includes('Action Approved &') && (
+                          <div className="mt-3.5 pt-3 border-t border-amber-300/70 flex flex-wrap items-center gap-2.5">
+                            <button
+                              type="button"
+                              onClick={() => handleExecute("approve")}
+                              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-mono font-bold text-xs shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <span>⚡</span>
+                              <span>Approve & Send Email Now</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setTab('approvals')}
+                              className="px-3.5 py-2 rounded-xl bg-white hover:bg-silver-100 text-silver-800 font-mono text-xs border border-silver-300 font-semibold transition-all cursor-pointer shadow-xs"
+                            >
+                              <span>🛡️ Open Approvals Tab</span>
+                            </button>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -1631,32 +1666,46 @@
               </div>
             ) : (
               <div className="space-y-3">
-                {run.steps.map((st, i) => (
-                  <div key={i} className="bg-white border border-silver-400/80 rounded-2xl p-5 shadow-sm space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <span className="w-6 h-6 rounded-full bg-accent-primary text-white flex items-center justify-center font-bold text-xs shadow-xs">
-                          {st.step_index + 1}
-                        </span>
-                        <div>
-                          <span className="font-bold text-sm text-silver-900 font-mono">{st.step_name}</span>
-                          <span className="text-xs text-silver-700 font-mono block">Agent: {st.agent}</span>
+                {run.steps.map((st, i) => {
+                  const stepNum = st.step_number !== undefined ? st.step_number : (st.step_index !== undefined ? st.step_index + 1 : i + 1);
+                  const agentName = st.agent_name || st.agent || 'Agent';
+                  const stepTitle = st.step_name || `${agentName} Stage`;
+                  const stepStatus = st.status || (st.success !== undefined ? (st.success ? 'completed' : 'failed') : 'completed');
+                  let stepOutput = st.output_data || st.output_json || (st.error ? `Error: ${st.error}` : '');
+                  if (typeof stepOutput === 'string' && (stepOutput.trim().startsWith('{') || stepOutput.trim().startsWith('['))) {
+                    try {
+                      const parsed = JSON.parse(stepOutput);
+                      stepOutput = parsed.output || parsed.content || JSON.stringify(parsed, null, 2);
+                    } catch {}
+                  }
+
+                  return (
+                    <div key={i} className="bg-white border border-silver-400/80 rounded-2xl p-5 shadow-sm space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <span className="w-6 h-6 rounded-full bg-accent-primary text-white flex items-center justify-center font-bold text-xs shadow-xs font-mono">
+                            {stepNum}
+                          </span>
+                          <div>
+                            <span className="font-bold text-sm text-silver-900 font-mono">{stepTitle}</span>
+                            <span className="text-xs text-silver-700 font-mono block">Agent: {agentName}</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs font-mono text-silver-600">{st.latency_ms || 0}ms</span>
+                          <StatusPill status={stepStatus} size="sm" />
                         </div>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-xs font-mono text-silver-600">{st.latency_ms}ms</span>
-                        <StatusPill status={st.status} size="sm" />
-                      </div>
-                    </div>
 
-                    {st.output_data && (
-                      <div
-                        className="prose-output bg-silver-50 rounded-xl p-4 border border-silver-200 text-xs max-h-56 overflow-y-auto"
-                        dangerouslySetInnerHTML={{ __html: renderFormattedMarkdown(st.output_data) }}
-                      />
-                    )}
-                  </div>
-                ))}
+                      {stepOutput && (
+                        <div
+                          className="prose-output bg-silver-50 rounded-xl p-4 border border-silver-200 text-xs max-h-56 overflow-y-auto"
+                          dangerouslySetInnerHTML={{ __html: renderFormattedMarkdown(stepOutput) }}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1777,20 +1826,42 @@
                           Reject
                         </button>
                         <button
-                          onClick={() => act('approve', appr.id)}
-                          className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-mono font-bold shadow-xs transition-all"
+                          onClick={async () => {
+                            try {
+                              await api.approve(appr.id);
+                              await api.execute(appr.id);
+                              await load();
+                              const recip = appr.payload?.to_email || appr.payload?.recipient || appr.payload?.to || '';
+                              alert('✅ Action Approved & Executed! ' + (recip ? 'Email successfully sent to ' + recip : 'Action dispatched.'));
+                            } catch (err) {
+                              alert('Approval & execution failed: ' + err.message);
+                              await load();
+                            }
+                          }}
+                          className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-mono font-bold shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
                         >
-                          Approve
+                          <span>⚡</span>
+                          <span>Approve & Send Email</span>
                         </button>
                       </>
                     )}
                     {appr.status === 'approved' && (
                       <button
-                        onClick={() => act('execute', appr.id)}
-                        className="px-4 py-2 rounded-lg bg-accent-primary hover:bg-accent-hover text-white text-xs font-mono font-bold shadow-md flex items-center gap-1.5 transition-all"
+                        onClick={async () => {
+                          try {
+                            await api.execute(appr.id);
+                            await load();
+                            const recip = appr.payload?.to_email || appr.payload?.recipient || appr.payload?.to || '';
+                            alert('✅ Dispatched & Sent! ' + (recip ? 'Email sent to ' + recip : ''));
+                          } catch (err) {
+                            alert('Execution failed: ' + err.message);
+                            await load();
+                          }
+                        }}
+                        className="px-4 py-2 rounded-xl bg-accent-primary hover:bg-accent-hover text-white text-xs font-mono font-bold shadow-md flex items-center gap-1.5 transition-all cursor-pointer"
                       >
                         <span>⚡</span>
-                        <span>Execute Approved</span>
+                        <span>Send Email Now (Execute)</span>
                       </button>
                     )}
                   </div>
@@ -3139,7 +3210,7 @@
           const res = await api.getSystemFlags();
           setFlags(res || []);
           const k = (res || []).find(f => f.key === 'kill_switch');
-          setKillSwitchActive(k ? k.value.toLowerCase() === 'true' : false);
+          setKillSwitchActive(k ? ['true', 'on', '1'].includes(k.value.toLowerCase()) : false);
           const b = (res || []).find(f => f.key === 'daily_budget_usd');
           if (b) setBudgetCeiling(b.value);
         } catch (err) {
@@ -3392,11 +3463,8 @@
             <div className="flex items-center gap-6">
               {/* Brand Emblem */}
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl flex items-center justify-center overflow-hidden border border-[#D5CEC2] shadow-xs bg-[#EEE9DF] flex-shrink-0">
-                  <svg viewBox="0 0 100 100" className="w-full h-full p-0.5">
-                    <path d="M 28.09 74.92 A 31 31 0 1 1 68.32 78.10" fill="none" stroke="#7E939C" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
-                    <circle cx="71.92" cy="74.92" r="5.5" fill="#FFB162" />
-                  </svg>
+                <div className="w-9 h-9 rounded-xl flex items-center justify-center overflow-hidden border border-silver-400/80 shadow-xs bg-slate-900 flex-shrink-0">
+                  <img src="/static/logo.png" alt="Orchestrator Emblem" className="w-full h-full object-cover" />
                 </div>
 
                 <div>

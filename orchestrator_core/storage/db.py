@@ -284,7 +284,8 @@ def log_audit(
 
 
 def get_db(db_path: Optional[str] = None) -> sqlite3.Connection:
-    """Create and configure a new SQLite connection."""
+    """Create and configure a new SQLite connection with cloud-drive lock resilience."""
+    import time
     if db_path is None:
         db_path = get_settings().database_path
 
@@ -292,24 +293,34 @@ def get_db(db_path: Optional[str] = None) -> sqlite3.Connection:
     if db_path != ":memory:":
         os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
 
-    conn = sqlite3.connect(db_path, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
+    retries = 5
+    for attempt in range(retries):
+        try:
+            conn = sqlite3.connect(db_path, timeout=15.0, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
 
-    # Enforce SQLite best practices: foreign keys, busy timeout, and WAL mode
-    conn.execute("PRAGMA foreign_keys = ON;")
-    conn.execute("PRAGMA busy_timeout = 5000;")
-    if db_path != ":memory:":
-        conn.execute("PRAGMA journal_mode = WAL;")
-        conn.execute("PRAGMA synchronous = NORMAL;")
-        conn.execute("PRAGMA cache_size = -64000;")
-        conn.execute("PRAGMA temp_store = MEMORY;")
+            # Enforce SQLite best practices: foreign keys, busy timeout, and WAL mode
+            conn.execute("PRAGMA foreign_keys = ON;")
+            conn.execute("PRAGMA busy_timeout = 15000;")
+            if db_path != ":memory:":
+                try:
+                    conn.execute("PRAGMA journal_mode = WAL;")
+                except sqlite3.OperationalError:
+                    pass
+                conn.execute("PRAGMA synchronous = NORMAL;")
+                conn.execute("PRAGMA cache_size = -64000;")
+                conn.execute("PRAGMA temp_store = MEMORY;")
 
-    # Ensure schema is initialized if tables do not exist yet
-    cur = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='approvals';")
-    if not cur.fetchone():
-        run_migrations(conn)
+            # Ensure schema is initialized if tables do not exist yet
+            cur = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='approvals';")
+            if not cur.fetchone():
+                run_migrations(conn)
 
-    return conn
+            return conn
+        except sqlite3.OperationalError:
+            if attempt == retries - 1:
+                raise
+            time.sleep(0.08 * (2 ** attempt))
 
 
 def get_db_connection() -> Generator[sqlite3.Connection, None, None]:
