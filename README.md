@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/logo.svg" width="92" height="92" alt="Orchestrator Agent Logo" />
+  <img src="docs/logo.png" width="96" height="96" alt="Orchestrator Agent Logo" style="border-radius: 20px;" />
 </p>
 
 # Autonomous Orchestrator Agent v1.0.0

@@ -4,42 +4,53 @@ __pycache__/
 *$py.class
 *.pyo
 
-# Environments
+# Environments & Sensitive Credentials
 .env
+.env.*
+!.env.example
 .venv/
 venv/
 ENV/
 env/
-.env.local
+*.pem
+*.key
+*.cert
+*.p12
 
 # Editor directories and files
 .vscode/
 .idea/
 *.swp
 *.swo
+*.sublime-workspace
+*.sublime-project
 
-# Database files
+# Database & SQLite files
 *.db
 *.sqlite
 *.sqlite3
 database/*.db
+database/*.sqlite
+database/*.sqlite3
 
 # SQLite write-ahead log and shared memory files
 *.db-journal
 *.db-wal
 *.db-shm
 
-# Chroma DB storage
+# Chroma DB vector storage
 chroma_db/
 
 # Logs and runtime files
 *.log
 *.pid
+test-reports/
+*.test.log
 
 # Runtime cache artifacts
 job_cache.json
 
-# Python packaging
+# Python packaging & build
 build/
 dist/
 *.egg-info/
@@ -49,28 +60,40 @@ dist/
 
 # Windows
 Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
 
-# pytest
+# Testing & Code Quality caches
 .pytest_cache/
-
-# Coverage
+.ruff_cache/
 htmlcov/
 .coverage
 .coverage.*
+scratch/
+test_scratch/
 
 # JetBrains
 *.iml
 *.iws
 
-# Node modules
+# Node modules & frontend artifacts
 node_modules/
 toji-shell/node_modules/
+frontend/node_modules/
+frontend/dist/
 
 # Electron build output
 toji-shell/dist/
 toji-shell/out/
 
-# Planning documents (not part of deployed codebase)
+# Planning documents, personal notes & scratch plans
 New plan/
-implementation_plan.md
+*plan*.md
+*.plan
 AAQIL_AUTONOMOUS_AGENT_PLAN.md
+implementation_plan.md
+TODO.md
+*.scratch.*
+
+# Runtime evaluation dump runs (historical baselines preserved)
+eval/results/20261*.json

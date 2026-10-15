@@ -663,26 +663,30 @@ def _dispatch_action(
     # Action dispatch branches
     if action_type == "send_email":
         import os
-        email_addr = os.getenv("EMAIL_ADDRESS")
-        email_pass = os.getenv("EMAIL_APP_PASSWORD")
-        to_email = payload.get("to_email")
+        from orchestrator_core.config import get_settings
+        settings = get_settings()
+        email_addr = os.getenv("EMAIL_ADDRESS") or settings.email_address
+        email_pass = os.getenv("EMAIL_APP_PASSWORD") or settings.email_app_password
+        to_email = payload.get("to_email") or payload.get("recipient") or payload.get("to")
         subject = payload.get("subject", "Orchestrator Notification")
         body = payload.get("body", "")
-        if email_addr and email_pass and to_email and "your_email" not in email_addr:
+        if email_addr and email_pass and to_email and "your_email" not in str(email_addr):
             try:
                 import smtplib
                 from email.mime.text import MIMEText
 
-                msg = MIMEText(body)
+                clean_to = str(to_email).strip()
+                msg = MIMEText(body, "plain", "utf-8")
                 msg["Subject"] = subject
                 msg["From"] = email_addr
-                msg["To"] = to_email
-                with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+                msg["To"] = clean_to
+                with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20) as server:
                     server.login(email_addr, email_pass)
                     server.send_message(msg)
-                logger.info("Real SMTP sent email to %s via %s", to_email, email_addr)
+                logger.info("Real SMTP sent email to %s via %s", clean_to, email_addr)
             except Exception as exc:
-                logger.warning("SMTP send attempt failed (%s) — logged audit stub.", exc)
+                logger.error("SMTP send attempt failed: %s", exc)
+                raise RuntimeError(f"SMTP delivery failed: {exc}")
         else:
             logger.info("Email action logged (credentials unconfigured or demo mode). to=%s payload_hash=%s", to_email, payload_hash)
     elif action_type == "publish_hashnode":

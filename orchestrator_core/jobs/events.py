@@ -70,9 +70,17 @@ class JobEventHub:
 
         self._subscribers.add(queue)
         try:
+            # If no replayed events are ready, immediately yield an initial comment so Starlette/ASGI
+            # flushes HTTP 200 headers to the browser EventSource without waiting for a new event.
+            if queue.empty():
+                yield ": connected\n\n"
             while True:
-                msg = await queue.get()
-                yield msg
+                try:
+                    msg = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    yield msg
+                except asyncio.TimeoutError:
+                    # Keep-alive heartbeat ping preventing proxy/browser dropped connection
+                    yield ": ping\n\n"
         finally:
             self._subscribers.discard(queue)
 

@@ -6,10 +6,15 @@ Settings are loaded on demand and cached, avoiding any import-time side effects
 or reliance on global mutable singletons.
 """
 
+import os
 from functools import lru_cache
 from typing import Optional
+from dotenv import load_dotenv
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Preload .env into os.environ so all standard library / SDK modules have access
+load_dotenv(override=False)
 
 
 class Settings(BaseSettings):
@@ -31,6 +36,36 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("executor_hmac_secret", "EXECUTOR_HMAC_SECRET"),
     )
 
+    # External integrations & credentials
+    email_address: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("email_address", "EMAIL_ADDRESS"),
+    )
+    email_app_password: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("email_app_password", "EMAIL_APP_PASSWORD"),
+    )
+    github_token: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("github_token", "GITHUB_TOKEN"),
+    )
+    hashnode_token: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("hashnode_token", "HASHNODE_TOKEN"),
+    )
+    devto_api_key: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("devto_api_key", "DEVTO_API_KEY"),
+    )
+    linkedin_email: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("linkedin_email", "LINKEDIN_EMAIL"),
+    )
+    linkedin_password: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("linkedin_password", "LINKEDIN_PASSWORD"),
+    )
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -38,7 +73,6 @@ class Settings(BaseSettings):
     )
 
     def model_post_init(self, __context) -> None:
-        import os
         if os.path.exists("/app/data") and self.database_path == "database/orchestrator.db":
             self.database_path = "/app/data/orchestrator.db"
         if os.path.exists("/app/data") and self.chroma_db_dir == "chroma_db":

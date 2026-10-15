@@ -169,6 +169,9 @@ async def delete_conversation(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Conversation '{conversation_id}' not found")
 
     with db:
+        db.execute("UPDATE jobs SET session_id = NULL WHERE session_id = ?", (conversation_id,))
+        db.execute("UPDATE memory_items SET source_session_id = NULL WHERE source_session_id = ?", (conversation_id,))
+        db.execute("DELETE FROM messages WHERE conversation_id = ?", (conversation_id,))
         db.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
 
     return {"deleted": True, "id": conversation_id}
