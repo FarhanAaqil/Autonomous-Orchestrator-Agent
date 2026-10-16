@@ -146,6 +146,10 @@ CREATE TABLE IF NOT EXISTS jobs (
 CREATE INDEX IF NOT EXISTS idx_jobs_queue ON jobs(status, priority, not_before);
 CREATE INDEX IF NOT EXISTS idx_jobs_thread ON jobs(thread_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_session ON jobs(session_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_agent ON jobs(agent);
+CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at);
+CREATE INDEX IF NOT EXISTS idx_jobs_parent ON jobs(parent_job_id);
 
 -- 9. Job steps table (step-level trace for every LLM/tool/propose/action call)
 CREATE TABLE IF NOT EXISTS job_steps (
@@ -165,6 +169,7 @@ CREATE TABLE IF NOT EXISTS job_steps (
     UNIQUE(job_id, idx)
 );
 CREATE INDEX IF NOT EXISTS idx_job_steps_job ON job_steps(job_id, idx);
+CREATE INDEX IF NOT EXISTS idx_job_steps_job_id ON job_steps(job_id);
 
 -- 10. System control flags
 CREATE TABLE IF NOT EXISTS system_flags (
@@ -190,6 +195,7 @@ CREATE INDEX IF NOT EXISTS idx_memory_items_kind ON memory_items(kind);
 CREATE INDEX IF NOT EXISTS idx_memory_items_pending ON memory_items(pending_review);
 CREATE INDEX IF NOT EXISTS idx_memory_items_deleted ON memory_items(deleted);
 CREATE INDEX IF NOT EXISTS idx_memory_items_session ON memory_items(source_session_id);
+CREATE INDEX IF NOT EXISTS idx_memory_items_key ON memory_items(key);
 
 -- 12. Recurring autonomous schedules table
 CREATE TABLE IF NOT EXISTS schedules (
@@ -205,6 +211,7 @@ CREATE TABLE IF NOT EXISTS schedules (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_schedules_active ON schedules(is_active);
+CREATE INDEX IF NOT EXISTS idx_schedules_next_run ON schedules(next_run_at);
 """
 
 
@@ -323,11 +330,95 @@ def get_db(db_path: Optional[str] = None) -> sqlite3.Connection:
             time.sleep(0.08 * (2 ** attempt))
 
 
+# ── Connection Pooling ────────────────────────────────────────────────────────
+import queue
+import threading
+
+
+class SQLiteConnectionPool:
+    """
+    Thread-safe connection pool for SQLite connections.
+    Avoids expensive connection tear-down and PRAGMA re-evaluations per request.
+    """
+    def __init__(self, max_size: int = 12):
+        self._max_size = max_size
+        self._pools: dict[str, queue.Queue[sqlite3.Connection]] = {}
+        self._lock = threading.Lock()
+
+    def get(self, db_path: Optional[str] = None) -> sqlite3.Connection:
+        if db_path is None:
+            db_path = get_settings().database_path
+
+        if db_path == ":memory:":
+            return get_db(db_path)
+
+        with self._lock:
+            if db_path not in self._pools:
+                self._pools[db_path] = queue.Queue(maxsize=self._max_size)
+            q = self._pools[db_path]
+
+        try:
+            conn = q.get_nowait()
+            try:
+                conn.execute("SELECT 1;")
+                return conn
+            except Exception:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+        except queue.Empty:
+            pass
+
+        return get_db(db_path)
+
+    def release(self, conn: sqlite3.Connection, db_path: Optional[str] = None) -> None:
+        if db_path is None:
+            db_path = get_settings().database_path
+
+        if db_path == ":memory:":
+            try:
+                conn.close()
+            except Exception:
+                pass
+            return
+
+        with self._lock:
+            q = self._pools.get(db_path)
+
+        if q is not None:
+            try:
+                q.put_nowait(conn)
+                return
+            except queue.Full:
+                pass
+
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    def close_all(self) -> None:
+        with self._lock:
+            for q in self._pools.values():
+                while not q.empty():
+                    try:
+                        conn = q.get_nowait()
+                        conn.close()
+                    except Exception:
+                        pass
+            self._pools.clear()
+
+
+_connection_pool = SQLiteConnectionPool(max_size=12)
+
+
 def get_db_connection() -> Generator[sqlite3.Connection, None, None]:
-    """FastAPI dependency yielding a managed SQLite connection."""
-    conn = get_db()
+    """FastAPI dependency yielding a pooled, managed SQLite connection."""
+    conn = _connection_pool.get()
     try:
         yield conn
     finally:
-        conn.close()
+        _connection_pool.release(conn)
+
 

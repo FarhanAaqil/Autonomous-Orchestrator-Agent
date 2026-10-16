@@ -3,12 +3,17 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Orchestrator Agent — Executive Control Plane</title>
+  <meta name="description" content="Autonomous multi-agent orchestration control plane with audited execution safety." />
+  <meta name="theme-color" content="#B0B8C4" />
   <link rel="icon" type="image/png" href="/static/logo.png" />
   <link rel="apple-touch-icon" href="/static/logo.png" />
   
-  <!-- Fonts -->
+  <!-- Preconnects & Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+  <link rel="preconnect" href="https://unpkg.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
 
   <!-- Markdown Parser & Sanitizer -->
@@ -184,7 +189,54 @@
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body class="min-h-screen flex flex-col antialiased">
-  <div id="root"></div>
+  <div id="root">
+    <!-- Instant Metallic Silver Executive Loading Skeleton (Renders in 0ms before JS loads) -->
+    <div id="loading-skeleton" style="min-height:100vh;display:flex;flex-direction:column;background-color:#B0B8C4;font-family:-apple-system,BlinkMacSystemFont,sans-serif;">
+      <!-- Header Skeleton -->
+      <div style="background:rgba(255,255,255,0.95);border-bottom:1px solid #94A3B8;padding:10px 24px;display:flex;align-items:center;justify-content:space-between;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="width:36px;height:36px;border-radius:10px;background:#0F172A;"></div>
+          <div>
+            <div style="width:110px;height:16px;background:#CBD5E1;border-radius:4px;margin-bottom:4px;"></div>
+            <div style="width:140px;height:10px;background:#E2E8F0;border-radius:4px;"></div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <div style="width:90px;height:28px;background:#E2E8F0;border-radius:8px;"></div>
+          <div style="width:80px;height:28px;background:#E2E8F0;border-radius:8px;"></div>
+        </div>
+      </div>
+      <!-- Stage Skeleton -->
+      <div style="flex:1;display:flex;gap:16px;padding:12px 20px;overflow:hidden;">
+        <!-- Left Sidebar Skeleton -->
+        <div style="width:300px;background:#FFFFFF;border:1px solid #94A3B8;border-radius:16px;padding:14px;display:flex;flex-direction:column;gap:12px;">
+          <div style="width:100%;height:36px;background:#0F172A;border-radius:10px;"></div>
+          <div style="width:90px;height:12px;background:#CBD5E1;border-radius:4px;"></div>
+          <div style="display:flex;flex-direction:column;gap:8px;flex:1;">
+            <div style="width:100%;height:44px;background:#F1F5F9;border-radius:8px;"></div>
+            <div style="width:100%;height:44px;background:#F1F5F9;border-radius:8px;"></div>
+            <div style="width:100%;height:44px;background:#F1F5F9;border-radius:8px;"></div>
+            <div style="width:100%;height:44px;background:#F1F5F9;border-radius:8px;"></div>
+          </div>
+        </div>
+        <!-- Right Chat Window Skeleton -->
+        <div style="flex:1;background:#FFFFFF;border:1px solid #94A3B8;border-radius:16px;display:flex;flex-direction:column;overflow:hidden;">
+          <div style="padding:12px 20px;border-bottom:1px solid #E2E8F0;display:flex;justify-content:space-between;background:#F8FAFC;">
+            <div style="width:160px;height:14px;background:#CBD5E1;border-radius:4px;"></div>
+            <div style="width:100px;height:14px;background:#E2E8F0;border-radius:4px;"></div>
+          </div>
+          <div style="flex:1;padding:24px;display:flex;flex-direction:column;gap:16px;">
+            <div style="max-width:480px;height:90px;background:#F1F5F9;border-radius:14px;"></div>
+            <div style="max-width:360px;margin-left:auto;height:45px;background:#0F172A;opacity:0.85;border-radius:14px;"></div>
+            <div style="max-width:600px;height:140px;background:#F1F5F9;border-radius:14px;"></div>
+          </div>
+          <div style="padding:14px;border-top:1px solid #E2E8F0;background:#FFFFFF;">
+            <div style="width:100%;height:54px;background:#F8FAFC;border:1px solid #CBD5E1;border-radius:14px;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script type="text/babel">
     const { useState, useEffect, useMemo, useRef } = React;
@@ -665,6 +717,7 @@
       const messagesEndRef = useRef(null);
       const chatContainerRef = useRef(null);
       const recognitionRef = useRef(null);
+      const silenceTimerRef = useRef(null);
 
       // IntersectionObserver sentinel on bottom message element
       useEffect(() => {
@@ -681,6 +734,39 @@
         return () => observer.disconnect();
       }, []);
 
+      // Voice output toggle handler: immediately halts any ongoing speech synthesis
+      const handleToggleVoiceOutput = () => {
+        setVoiceOutput(prev => {
+          const next = !prev;
+          if (!next && ('speechSynthesis' in window)) {
+            window.speechSynthesis.cancel();
+            if (window.toji?.setAvatarState) window.toji.setAvatarState('idle');
+          }
+          return next;
+        });
+      };
+
+      // Ensure that when voiceOutput becomes false for ANY reason, speech stops instantly
+      useEffect(() => {
+        if (!voiceOutput && ('speechSynthesis' in window)) {
+          window.speechSynthesis.cancel();
+          if (window.toji?.setAvatarState) window.toji.setAvatarState('idle');
+        }
+      }, [voiceOutput]);
+
+      // Cleanup speech and audio recognition on unmount
+      useEffect(() => {
+        return () => {
+          if ('speechSynthesis' in window) {
+            window.speechSynthesis.cancel();
+          }
+          if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+          if (recognitionRef.current) {
+            try { recognitionRef.current.stop(); } catch {}
+          }
+        };
+      }, []);
+
       // Listen for global voice toggle from tray or IPC
       useEffect(() => {
         if (window.toji?.onVoiceToggle) {
@@ -691,7 +777,7 @@
       }, [isListening]);
 
       const speakText = (text) => {
-        if (!('speechSynthesis' in window)) return;
+        if (!('speechSynthesis' in window) || !voiceOutput) return;
         window.speechSynthesis.cancel();
         const clean = text.replace(/[*#`_~\[\]\(\)>]/g, '').trim();
         const utterance = new SpeechSynthesisUtterance(clean);
@@ -716,34 +802,72 @@
           return;
         }
         if (isListening) {
-          recognitionRef.current?.stop();
+          if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+          try { recognitionRef.current?.stop(); } catch {}
           setIsListening(false);
           if (window.toji?.setAvatarState) window.toji.setAvatarState('idle');
           return;
         }
         try {
           const rec = new SpeechRecognition();
-          rec.continuous = false;
-          rec.interimResults = false;
+          rec.continuous = true;
+          rec.interimResults = true;
           rec.lang = 'en-US';
+          rec.maxAlternatives = 1;
+
+          let capturedTranscript = '';
+
+          const resetSilenceTimer = (ms = 9000) => {
+            if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+            silenceTimerRef.current = setTimeout(() => {
+              try { rec.stop(); } catch {}
+            }, ms);
+          };
+
           rec.onstart = () => {
             setIsListening(true);
             if (window.toji?.setAvatarState) window.toji.setAvatarState('thinking');
+            // Give 9 full seconds of patience for user to begin speaking
+            resetSilenceTimer(9000);
           };
+
           rec.onresult = (evt) => {
-            const transcript = evt.results[0][0].transcript;
-            setCommand(transcript);
-            setIsListening(false);
-            handleExecute(transcript);
+            // Once speech has started, allow 3 seconds of pause after last word
+            resetSilenceTimer(3000);
+            let interim = '';
+            let final = '';
+            for (let i = evt.resultIndex; i < evt.results.length; i++) {
+              const item = evt.results[i];
+              if (item.isFinal) {
+                final += item[0].transcript;
+              } else {
+                interim += item[0].transcript;
+              }
+            }
+            const current = (final || interim || '').trim();
+            if (current) {
+              capturedTranscript = current;
+              setCommand(current);
+            }
           };
+
           rec.onerror = (e) => {
-            console.warn("Speech recognition error:", e);
+            // Non-fatal: if user hasn't started speaking yet, don't crash or abort
+            if (e.error === 'no-speech') {
+              return;
+            }
+            console.warn("Speech recognition notice:", e.error);
+            if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
             setIsListening(false);
             if (window.toji?.setAvatarState) window.toji.setAvatarState('idle');
           };
+
           rec.onend = () => {
+            if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
             setIsListening(false);
+            if (window.toji?.setAvatarState) window.toji.setAvatarState('idle');
           };
+
           rec.start();
           recognitionRef.current = rec;
         } catch (err) {
@@ -996,7 +1120,7 @@
       ];
 
       return (
-        <div className="flex-1 min-h-0 flex flex-col h-full space-y-3">
+        <div className="flex-1 min-h-0 flex flex-col h-full space-y-2.5 w-full">
           {/* Header Bar */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-silver-500/40 pb-2 flex-shrink-0">
             <div>
@@ -1016,7 +1140,7 @@
                 <span>{sidebarOpen ? '◀ Hide Sidebar' : '☰ Show Sidebar'}</span>
               </button>
               <button
-                onClick={() => setVoiceOutput(!voiceOutput)}
+                onClick={handleToggleVoiceOutput}
                 className={`px-2.5 py-1 rounded-lg border text-xs font-mono font-bold flex items-center gap-1.5 transition-all shadow-xs ${
                   voiceOutput
                     ? 'bg-amber-100 border-amber-400 text-amber-900 font-extrabold'
@@ -1034,11 +1158,11 @@
           </div>
 
           {/* ChatGPT-Style Fixed Layout: Left Sidebar + Fixed-in-Place Chat Window */}
-          <div className="flex-1 min-h-0 flex flex-col md:flex-row gap-4 h-full overflow-hidden">
+          <div className="flex-1 min-h-0 flex flex-col md:flex-row gap-3.5 h-full overflow-hidden w-full">
             
             {/* ── LEFT SIDEBAR (Saved Chat Threads + Fleet Roster) ── */}
             {sidebarOpen && (
-            <aside className="w-full md:w-80 flex-shrink-0 flex flex-col bg-white border border-silver-400/80 rounded-2xl p-3.5 shadow-sm h-full overflow-hidden">
+            <aside className="w-full md:w-72 lg:w-80 flex-shrink-0 flex flex-col bg-white border border-silver-400/80 rounded-2xl p-3.5 shadow-sm h-full overflow-hidden">
               
               {/* Top: New Chat Action */}
               <button
@@ -1226,7 +1350,7 @@
                           <span>{m.time}</span>
                           <span className="font-bold text-silver-800">You</span>
                         </div>
-                        <div className="max-w-2xl bg-silver-900 text-white px-5 py-3 rounded-2xl rounded-tr-xs text-sm leading-relaxed shadow-sm font-sans whitespace-pre-wrap">
+                        <div className="max-w-3xl lg:max-w-4xl xl:max-w-5xl bg-silver-900 text-white px-5 py-3 rounded-2xl rounded-tr-xs text-sm leading-relaxed shadow-sm font-sans whitespace-pre-wrap">
                           {m.text}
                         </div>
                       </div>
@@ -1235,7 +1359,7 @@
 
                   if (m.role === 'clarification') {
                     return (
-                      <div key={m.id} className="flex flex-col items-start space-y-2 max-w-3xl">
+                      <div key={m.id} className="flex flex-col items-start space-y-2 w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl">
                         <div className="bg-amber-50 border border-amber-300 rounded-2xl p-4 shadow-sm space-y-2.5 w-full">
                           <div className="flex items-center justify-between text-amber-900 font-bold text-sm">
                             <span className="flex items-center gap-2">
@@ -1266,7 +1390,7 @@
 
                   if (m.role === 'error') {
                     return (
-                      <div key={m.id} className="flex flex-col items-start space-y-1 max-w-2xl">
+                      <div key={m.id} className="flex flex-col items-start space-y-1 w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl">
                         <div className="bg-red-50 border border-red-200 rounded-xl p-3.5 text-xs font-mono text-red-900 flex items-start gap-3 shadow-sm w-full">
                           <span className="text-base text-red-600">⚠️</span>
                           <div className="flex-1 space-y-0.5">
@@ -1284,7 +1408,7 @@
                   const displayAgentName = m.agent === 'general_chat_agent' ? 'Toji' : (m.agent || 'Assistant');
 
                   return (
-                    <div key={m.id} className="flex flex-col items-start space-y-2 max-w-3xl">
+                    <div key={m.id} className="flex flex-col items-start space-y-2 w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl">
                       {/* Assistant Header Capsule */}
                       <div className="flex flex-wrap items-center justify-between gap-3 w-full border-b border-silver-200 pb-1.5">
                         <div className="flex items-center gap-2">
@@ -1374,7 +1498,7 @@
 
                 {/* Loading Skeleton Loader */}
                 {loading && (
-                  <div className="flex flex-col items-start space-y-3 max-w-2xl w-full">
+                  <div className="flex flex-col items-start space-y-3 w-full max-w-4xl lg:max-w-5xl xl:max-w-6xl">
                     <div className="flex items-center gap-2">
                       <span className="w-4 h-4 rounded-full border-2 border-accent-primary border-t-transparent animate-spin" />
                       <span className="text-xs font-mono font-bold text-silver-700 animate-pulse">Toji is executing & orchestrating response...</span>
@@ -1401,6 +1525,23 @@
 
               {/* Bottom Fixed Input Dock */}
               <div className="border-t border-silver-300 bg-white p-3.5 space-y-2.5 flex-shrink-0">
+                {/* Active Listening Notification Banner */}
+                {isListening && (
+                  <div className="flex items-center justify-between px-3 py-1.5 bg-red-50 border border-red-300 rounded-xl text-xs font-mono text-red-700 animate-pulse">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-red-600 animate-ping"></span>
+                      <span className="font-bold">Microphone Active: Speak your prompt now...</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={toggleListening}
+                      className="text-[11px] font-bold underline hover:text-red-900 cursor-pointer"
+                    >
+                      Done / Stop
+                    </button>
+                  </div>
+                )}
+
                 {/* Quick-Prompt Suggestions Carousel */}
                 <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar text-xs">
                   <span className="text-[11px] font-mono text-silver-500 flex-shrink-0">Prompts:</span>
@@ -2197,6 +2338,8 @@
       const [newPriority, setNewPriority] = useState(0);
       const [creating, setCreating] = useState(false);
 
+      const [cancellingAll, setCancellingAll] = useState(false);
+
       const loadJobs = async () => {
         try {
           const res = await api.getJobs({ status: statusFilter !== 'all' ? statusFilter : undefined, limit: 50 });
@@ -2253,6 +2396,31 @@
           loadJobs();
         } catch (err) {
           alert('Cancel failed: ' + err.message);
+        }
+      };
+
+      const handleCancelAllQueued = async () => {
+        try {
+          const res = await api.getJobs({ status: 'queued', limit: 100 });
+          const queued = res.items || [];
+          if (queued.length === 0) {
+            alert('There are no queued jobs to cancel.');
+            return;
+          }
+          if (!confirm(`Cancel all ${queued.length} queued jobs?`)) return;
+          setCancellingAll(true);
+          for (const q of queued) {
+            try {
+              await api.cancelJob(q.id);
+            } catch (err) {
+              console.error('Failed to cancel job ' + q.id, err);
+            }
+          }
+          await loadJobs();
+        } catch (err) {
+          alert('Cancel all failed: ' + err.message);
+        } finally {
+          setCancellingAll(false);
         }
       };
 
@@ -2317,6 +2485,15 @@
               </p>
             </div>
             <div className="flex items-center gap-2">
+              <button
+                onClick={handleCancelAllQueued}
+                disabled={cancellingAll}
+                className="px-3.5 py-2 rounded-xl bg-red-50 hover:bg-red-600 text-red-700 hover:text-white border border-red-200 font-bold text-xs transition-all flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
+                title="Cancel all queued tasks waiting in the backlog"
+              >
+                <span>⛔</span>
+                <span>{cancellingAll ? 'Cancelling...' : 'Cancel All Queued'}</span>
+              </button>
               <button onClick={loadJobs} className="px-3.5 py-2 rounded-xl bg-white hover:bg-silver-100 border border-silver-300 text-silver-800 font-bold text-xs transition-all flex items-center gap-1.5 shadow-xs cursor-pointer">
                 <span>↻ Refresh</span>
               </button>
@@ -3576,7 +3753,7 @@
           </div>
 
           {/* Main Stage */}
-          <main className={`w-full mx-auto ${tab === 'dispatch' ? 'flex-1 min-h-0 max-w-7xl px-4 md:px-6 py-2.5 flex flex-col overflow-hidden' : 'flex-1 max-w-7xl p-6 md:p-8'}`}>
+          <main className={`w-full mx-auto ${tab === 'dispatch' ? 'flex-1 min-h-0 w-full px-2 sm:px-4 md:px-5 py-2 flex flex-col overflow-hidden' : 'flex-1 w-full max-w-[1750px] p-4 md:p-6 lg:p-8'}`}>
             {tab === 'dispatch' && <DispatchView />}
             {tab === 'jobs' && <JobsView />}
             {tab === 'schedules' && <SchedulesView />}
