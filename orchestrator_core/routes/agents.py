@@ -11,10 +11,11 @@ from datetime import datetime, timezone
 import sqlite3
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
 
 from orchestrator_core.models import canonical_agent_name
+from orchestrator_core.storage.cache import api_cache, query_cache
 from orchestrator_core.storage.db import get_db_connection
 from orchestrator_core.tools.registry import default_registry, get_tool_circuit_status
 
@@ -114,14 +115,24 @@ _BASE_AGENTS_METADATA: list[dict] = [
 ]
 
 
-def _build_agent_info(meta: dict, db: sqlite3.Connection) -> AgentInfo:
+def _build_agent_info(
+    meta: dict,
+    db: Optional[sqlite3.Connection] = None,
+    flags_map: Optional[dict[str, str]] = None,
+) -> AgentInfo:
     """Build dynamic AgentInfo with active status, allowed tools, and circuit breaker health."""
     agent_id = meta["id"]
 
-    # Check administrative toggle in system_flags
+    # Check administrative toggle in system_flags without N+1 overhead
     flag_key = f"agent_enabled_{agent_id}"
-    row = db.execute("SELECT value FROM system_flags WHERE key = ?", (flag_key,)).fetchone()
-    is_active = (row["value"] != "0") if row else True
+    if flags_map is not None:
+        flag_val = flags_map.get(flag_key)
+        is_active = (flag_val != "0") if flag_val is not None else True
+    elif db is not None:
+        row = db.execute("SELECT value FROM system_flags WHERE key = ?", (flag_key,)).fetchone()
+        is_active = (row["value"] != "0") if row else True
+    else:
+        is_active = True
 
     # Resolve allowed tools
     allowed_tools = sorted(list(default_registry.for_agent(agent_id).keys()))
@@ -152,9 +163,20 @@ def _build_agent_info(meta: dict, db: sqlite3.Connection) -> AgentInfo:
 
 
 @router.get("", response_model=list[AgentInfo])
-async def list_agents(db: sqlite3.Connection = Depends(get_db_connection)):
+async def list_agents(
+    response: Response,
+    db: sqlite3.Connection = Depends(get_db_connection),
+):
     """Return the complete roster of orchestrator agents with live health and tool statuses."""
-    return [_build_agent_info(meta, db) for meta in _BASE_AGENTS_METADATA]
+    flags_map = query_cache.get("system_flags:agent_enabled")
+    if flags_map is None:
+        flag_rows = db.execute("SELECT key, value FROM system_flags WHERE key LIKE 'agent_enabled_%';").fetchall()
+        flags_map = {row["key"]: row["value"] for row in flag_rows}
+        query_cache.set("system_flags:agent_enabled", flags_map, ttl=5.0)
+
+    agents = [_build_agent_info(meta, flags_map=flags_map) for meta in _BASE_AGENTS_METADATA]
+    response.headers["Cache-Control"] = "no-cache"
+    return agents
 
 
 @router.get("/{agent_id}", response_model=AgentInfo)
@@ -164,13 +186,14 @@ async def get_agent(agent_id: str, db: sqlite3.Connection = Depends(get_db_conne
     match = next((m for m in _BASE_AGENTS_METADATA if m["id"] in (agent_id, canonical)), None)
     if not match:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent '{agent_id}' not found.")
-    return _build_agent_info(match, db)
+    return _build_agent_info(match, db=db)
 
 
 @router.patch("/{agent_id}", response_model=AgentInfo)
 async def update_agent_status(
     agent_id: str,
     body: AgentUpdateRequest,
+    response: Response,
     db: sqlite3.Connection = Depends(get_db_connection),
 ):
     """Enable or disable an agent in system_flags."""
@@ -193,4 +216,9 @@ async def update_agent_status(
             (flag_key, flag_val, now_iso),
         )
 
-    return _build_agent_info(match, db)
+    # Invalidate cached flags and agent list immediately
+    query_cache.delete("system_flags:agent_enabled")
+    api_cache.delete("agents:list")
+    response.headers["Cache-Control"] = "no-cache"
+
+    return _build_agent_info(match, db=db)

@@ -314,8 +314,11 @@ if FRONTEND_DIR.exists():
 @app.get("/", include_in_schema=False)
 @app.get("/ui", include_in_schema=False)
 async def serve_ui():
-    """Serve the standalone React 18 / MP072 control plane dashboard."""
+    """Serve the standalone React 18 / MP072 control plane dashboard with cache headers."""
     if INDEX_HTML.exists():
-        return FileResponse(INDEX_HTML)
+        return FileResponse(
+            INDEX_HTML,
+            headers={"Cache-Control": "public, max-age=300, stale-while-revalidate=600"},
+        )
     return JSONResponse(status_code=404, content={"error": "UI index.html not found"})
 

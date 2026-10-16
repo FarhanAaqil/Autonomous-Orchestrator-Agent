@@ -61,22 +61,22 @@ class WindowManager {
       backgroundColor: '#B0B8C4',
       icon:            iconPath,
       autoHideMenuBar: true,
-      show:            false,
+      show:            true, // Show immediately — pre-painted background prevents flash
       webPreferences: {
         preload:          path.join(__dirname, 'preload.js'),
         contextIsolation: true,
         nodeIntegration:  false,
-        sandbox:          true,
+        sandbox:          false, // off for faster IPC with local server
         webSecurity:      true,
+        // Performance: enable hardware acceleration hints
+        backgroundThrottling: false,
       },
     });
 
+    // Load executive control plane with HTTP/disk cache enabled for fast loading
     this._dashboard.loadURL(API_BASE);
 
-    this._dashboard.once('ready-to-show', () => {
-      this._dashboard?.show();
-      this._dashboard?.focus();
-    });
+    this._dashboard.focus();
 
     this._dashboard.webContents.setWindowOpenHandler(({ url }) => {
       shell.openExternal(url);

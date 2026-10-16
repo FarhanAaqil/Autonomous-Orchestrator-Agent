@@ -763,9 +763,38 @@
       }
     });
 
+    let voiceOutputEnabled = false;
+
+    function stopVoiceOutput() {
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+      voiceOutputEnabled = false;
+      voiceBtn.style.color = '';
+      voiceBtn.style.background = '';
+      if (window.toji?.setAvatarState) window.toji.setAvatarState('idle');
+    }
+
+    function toggleVoiceOutput() {
+      voiceOutputEnabled = !voiceOutputEnabled;
+      if (!voiceOutputEnabled) {
+        stopVoiceOutput();
+      } else {
+        voiceBtn.style.color = 'var(--accent)';
+        voiceBtn.style.background = 'rgba(255, 177, 98, 0.15)';
+      }
+    }
+
     voiceBtn.addEventListener('click', () => {
+      toggleVoiceOutput();
       if (window.toji?.toggleVoice) window.toji.toggleVoice();
     });
+
+    if (window.toji?.onVoiceToggle) {
+      window.toji.onVoiceToggle(() => {
+        toggleVoiceOutput();
+      });
+    }
 
     clearBtn.addEventListener('click', () => {
       currentConversationId = null;
@@ -1025,6 +1054,15 @@
         // Finalize output
         cursor.remove();
         bubbleEl.innerHTML = renderMarkdown(fullText || '_Execution completed._');
+
+        if (voiceOutputEnabled && ('speechSynthesis' in window) && fullText) {
+          window.speechSynthesis.cancel();
+          const clean = fullText.replace(/[*#`_~\[\]\(\)>]/g, '').trim();
+          const utt = new SpeechSynthesisUtterance(clean);
+          utt.rate = 1.05;
+          utt.pitch = 0.95;
+          window.speechSynthesis.speak(utt);
+        }
       } catch (err) {
         cursor.remove();
         bubbleEl.innerHTML = `<span style="color:var(--danger)">⚠️ Error: ${escapeHtml(err.message)}</span>`;

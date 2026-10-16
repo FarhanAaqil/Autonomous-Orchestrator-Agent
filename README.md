@@ -18,52 +18,35 @@ Orchestrator Agent coordinates natural language instructions across a specialize
 
 ---
 
-## Visual Demo & Interface Screenshots
+## Visual Interface Overview
 
-### 1. Conversational Chat & Dispatch Console
-*ChatGPT-style conversational stream with real-time token delivery, thread switching, auto-clearing input dock, and sticky-bottom intelligent autoscroll.*
+<p align="center">
+  <img src="docs/screenshots/dashboard_preview.png" alt="Orchestrator Agent Executive Control Plane" width="100%" style="border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.12);" />
+</p>
 
-![Conversational Chat Stream](docs/screenshots/chat_stream.png)
+*Executive Control Plane: Real-time conversational streaming, autonomous multi-agent dispatch, voice synthesis controls, and responsive workspace.*
 
-### 2. Autonomous Jobs Timeline & Step Inspector
-*Deep execution drilldown into every turn: thought traces, tool invocations, token consumption, latencies, and Compare-And-Set worker state transitions.*
+<br/>
 
-![Autonomous Jobs Timeline](docs/screenshots/jobs_timeline.png)
+<p align="center">
+  <img src="docs/screenshots/jobs_timeline.png" alt="Autonomous Jobs Timeline & Step Telemetry" width="100%" style="border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.12);" />
+</p>
 
-### 3. Cryptographic Human-in-the-Loop Approval Gate (SEC-01..08)
-*Zero-Parameter execution guarantee, HMAC-SHA256 signature verification, SHA-256 payload binding, and immutable audit log trail.*
+*Autonomous Jobs Timeline: Turn-by-turn thought traces, tool observations, token consumption telemetry, and queue backlog management.*
 
-![Approval Gate](docs/screenshots/approvals_gate.png)
+### Integrated Control Plane Modules
 
-### 4. Cron Schedules & Recurring Tasks
-*Full scheduling engine with cadence presets (15m, Hourly, Daily, Weekly), custom cron builder, and instant `Run Now` execution triggers.*
-
-![Schedules View](docs/screenshots/schedules_view.png)
-
-### 5. Multi-Tier Semantic & Episodic Memory
-*Semantic facts/preferences with owner confirmation review queue (`pending_review=1`), automated session summarization, and vector forget purge.*
-
-![Memory Management](docs/screenshots/memory_view.png)
-
-### 6. Multi-Agent Pipeline Orchestration
-*Pre-configured multi-stage workflows (`Candidate Application`, `Technical Publishing`, `Academic Research Synthesis`) with stage indicators and trace capture.*
-
-![Pipelines View](docs/screenshots/pipelines_view.png)
-
-### 7. Router Benchmark & Empirical Confusion Matrix
-*209-sample intent classification benchmark measuring classification accuracy, per-agent precision/recall, and prompt drift against frozen splits.*
-
-![Router Benchmark](docs/screenshots/benchmark_view.png)
-
-### 8. Emergency Settings & Budget Controls
-*One-step emergency kill switch halting running agent loops instantly, daily dollar budget ceilings ($5.00 hard stop), and live system flags database viewer.*
-
-![Settings & Budget Controls](docs/screenshots/settings_view.png)
-
-### 9. System Diagnostics & Circuit Breakers
-*Live telemetry for third-party API circuit breakers (fail-fast 30s threshold), failure counters, manual reset triggers, and architectural invariants.*
-
-![Diagnostics & Circuit Breaker](docs/screenshots/diagnostics_view.png)
+| Module | Purpose | Core Features |
+| :--- | :--- | :--- |
+| **Conversational Dispatch** | Real-time SSE streaming console | Multi-turn chat, markdown rendering, voice input/output controls |
+| **Jobs Timeline & Telemetry** | Autonomous loop inspection | Compare-And-Set worker transitions, step latency, tool traces, token caps |
+| **Approval Gate (SEC-01..08)** | Cryptographic authorization | HMAC-SHA256 signatures, zero-parameter execution, tamper detection |
+| **Cron Schedules** | Recurring agent automation | Preset cadences (15m, Hourly, Daily), custom cron expressions, manual execution |
+| **Episodic Memory** | Multi-tier semantic persistence | Vector search, human confirmation review queue, session summarization |
+| **Multi-Agent Pipelines** | Multi-stage workflows | Chained agents (e.g. Research → Publishing), stage progress indicators |
+| **Router Benchmark** | Empirical evaluation suite | 209-sample intent benchmark, accuracy/precision/recall matrix |
+| **Budget & Safety Controls** | Autonomous guardrails | Hard budget caps ($5.00 default), step ceilings, global emergency kill-switch |
+| **Diagnostics & Telemetry** | System health monitoring | API circuit breakers (30s timeout), connection pool stats, failure counters |
 
 ---
 
