@@ -14,6 +14,15 @@ import pytest
 from orchestrator_core.storage.db import get_db, run_migrations
 
 
+@pytest.fixture(autouse=True)
+def prevent_real_email_in_tests(monkeypatch):
+    """
+    Ensure all test executions strictly run in simulation mode and never
+    connect to live external SMTP servers or transmit real emails.
+    """
+    monkeypatch.setenv("ENABLE_REAL_EMAIL", "false")
+
+
 @pytest.fixture()
 def db() -> sqlite3.Connection:
     """
@@ -24,3 +33,4 @@ def db() -> sqlite3.Connection:
     run_migrations(conn)
     yield conn
     conn.close()
+

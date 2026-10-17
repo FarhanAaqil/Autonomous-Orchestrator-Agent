@@ -670,7 +670,18 @@ def _dispatch_action(
         to_email = payload.get("to_email") or payload.get("recipient") or payload.get("to")
         subject = payload.get("subject", "Orchestrator Notification")
         body = payload.get("body", "")
-        if email_addr and email_pass and to_email and "your_email" not in str(email_addr):
+
+        is_test = bool(os.getenv("PYTEST_CURRENT_TEST"))
+        enable_real = (
+            os.getenv("ENABLE_REAL_EMAIL", "").lower() in ("true", "1")
+            or getattr(settings, "enable_real_email", False)
+        )
+        # Block dummy or reserved test domains from real SMTP dispatch
+        dummy_domains = ("example.com", "example.org", "example.net", "company.org", "test.com", "localhost")
+        recipient_domain = str(to_email).split("@")[-1].lower() if "@" in str(to_email) else ""
+        is_dummy_target = any(recipient_domain == d or recipient_domain.endswith("." + d) for d in dummy_domains)
+
+        if not is_test and enable_real and not is_dummy_target and email_addr and email_pass and to_email and "your_email" not in str(email_addr):
             try:
                 import smtplib
                 from email.mime.text import MIMEText
@@ -688,7 +699,14 @@ def _dispatch_action(
                 logger.error("SMTP send attempt failed: %s", exc)
                 raise RuntimeError(f"SMTP delivery failed: {exc}")
         else:
-            logger.info("Email action logged (credentials unconfigured or demo mode). to=%s payload_hash=%s", to_email, payload_hash)
+            logger.info(
+                "Email action logged (safe simulation / stub mode). to=%s enable_real=%s is_test=%s is_dummy=%s payload_hash=%s",
+                to_email,
+                enable_real,
+                is_test,
+                is_dummy_target,
+                payload_hash,
+            )
     elif action_type == "publish_hashnode":
         logger.info("Executed publish_hashnode. payload_hash=%s", payload_hash)
     elif action_type == "publish_devto":

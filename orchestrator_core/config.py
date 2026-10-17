@@ -45,6 +45,10 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("email_app_password", "EMAIL_APP_PASSWORD"),
     )
+    enable_real_email: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("enable_real_email", "ENABLE_REAL_EMAIL"),
+    )
     github_token: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("github_token", "GITHUB_TOKEN"),
