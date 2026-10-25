@@ -78,6 +78,8 @@ class ApprovalRecord(BaseModel):
     decided_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
     executed_at: Optional[datetime] = None
+    source_agent: Optional[str] = None
+    session_id: Optional[str] = None
 
 
 class ApprovalRequest(BaseModel):
@@ -90,7 +92,8 @@ class ApprovalRequest(BaseModel):
 
 class ApprovalApproveRequest(BaseModel):
     """Body for POST /approvals/{id}/approve with TOCTOU expected_hash validation."""
-    expected_hash: Optional[str] = None
+    expected_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    session_id: Optional[str] = None
 
 
 class ApprovalRejectRequest(BaseModel):

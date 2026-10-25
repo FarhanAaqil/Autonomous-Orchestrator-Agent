@@ -30,5 +30,5 @@ def test_canonical_recipient_is_stored(db):
 def test_unavailable_adapter_cannot_be_approved(db):
     aid = request_approval("github_issue", {"repo": "owner/repo", "title": "Issue", "body": "Details"}, db)
     with pytest.raises(SecurityPolicyViolationError):
-        approve(aid, db)
+        approve(aid, db, db.execute("SELECT payload_hash FROM approvals WHERE id=?", (aid,)).fetchone()[0])
     assert all(s.schema and s.agents for s in ACTION_CATALOG.values())

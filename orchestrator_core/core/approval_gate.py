@@ -107,6 +107,7 @@ def generate_approval_signature(
     approved_hash: str,
     decided_at: str,
     secret: Optional[str] = None,
+    context: str = "",
 ) -> str:
     """
     HMAC-SHA256 signature over (approval_id, approved_hash, decided_at).
@@ -114,7 +115,7 @@ def generate_approval_signature(
     """
     if secret is None:
         secret = get_settings().executor_hmac_secret
-    message = f"{approval_id}:{approved_hash}:{decided_at}".encode("utf-8")
+    message = f"{approval_id}:{approved_hash}:{decided_at}:{context}".encode("utf-8")
     return hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
 
 
@@ -124,11 +125,12 @@ def verify_approval_signature(
     decided_at: str,
     signature: Optional[str],
     secret: Optional[str] = None,
+    context: str = "",
 ) -> bool:
     """Verify HMAC signature against expected secret."""
     if not signature:
         return False
-    expected = generate_approval_signature(approval_id, approved_hash, decided_at, secret)
+    expected = generate_approval_signature(approval_id, approved_hash, decided_at, secret, context)
     return hmac.compare_digest(expected, signature)
 
 
@@ -267,10 +269,15 @@ def request_approval(
 
 # ── State transitions ──────────────────────────────────────────────────────────
 
+def _consent_context(row) -> str:
+    return json.dumps([row["source_agent"], row["session_id"], row["expires_at"]], separators=(",", ":"))
+
+
 def approve(
     approval_id: str,
     db: sqlite3.Connection,
     expected_hash: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> None:
     """
     Transition a pending approval to 'approved' state.
@@ -279,7 +286,7 @@ def approve(
     SEC-03: Computes and persists HMAC signature with server secret.
     """
     row = db.execute(
-        "SELECT id, action_type, payload_json, target, payload_hash, status FROM approvals WHERE id = ?",
+        "SELECT * FROM approvals WHERE id = ?",
         (approval_id,),
     ).fetchone()
 
@@ -292,8 +299,13 @@ def approve(
 
     # TOCTOU check against displayed expected_hash
     stored_hash = row["payload_hash"]
-    if expected_hash is not None and expected_hash != stored_hash:
+    if not expected_hash or expected_hash != stored_hash:
         raise ApprovalHashMismatchError(approval_id, expected_hash, stored_hash)
+
+    if session_id != row["session_id"]:
+        raise SecurityPolicyViolationError("Review belongs to a different conversation.")
+    if not row["expires_at"] or datetime.fromisoformat(row["expires_at"]) <= datetime.now(timezone.utc):
+        raise ApprovalExpiredError(approval_id)
 
     # SEC-02 Integrity check: recalculate hash from raw DB content
     recomputed_hash = compute_payload_hash(row["action_type"], row["payload_json"], row["target"])
@@ -312,7 +324,7 @@ def approve(
     require_adapter(row["action_type"])
     decided_at = datetime.now(timezone.utc).isoformat()
     approved_hash = stored_hash
-    signature = generate_approval_signature(approval_id, approved_hash, decided_at)
+    signature = generate_approval_signature(approval_id, approved_hash, decided_at, context=_consent_context(row))
 
     with db:
         db.execute(
@@ -384,7 +396,7 @@ def edit_and_supersede(
     with supersedes_id set. The previous approval can never be executed.
     """
     row = db.execute(
-        "SELECT id, action_type, status, target FROM approvals WHERE id = ?",
+        "SELECT * FROM approvals WHERE id = ?",
         (approval_id,),
     ).fetchone()
 
@@ -422,9 +434,9 @@ def edit_and_supersede(
             """
             INSERT INTO approvals (
                 id, action_type, payload_json, target, payload_hash,
-                status, idempotency_key, supersedes_id, created_at, expires_at
+                status, idempotency_key, supersedes_id, created_at, expires_at, source_agent, session_id
             )
-            VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
             """,
             (
                 new_id,
@@ -436,6 +448,8 @@ def edit_and_supersede(
                 approval_id,
                 created_at.isoformat(),
                 expires_at.isoformat(),
+                row["source_agent"],
+                row["session_id"],
             ),
         )
 
@@ -484,7 +498,7 @@ def execute_approved(approval_id: str, db: sqlite3.Connection) -> None:
     row = db.execute(
         """
         SELECT id, action_type, payload_json, target, payload_hash, status,
-               idempotency_key, approval_signature, approved_hash, decided_at, expires_at, source_agent
+               idempotency_key, approval_signature, approved_hash, decided_at, expires_at, source_agent, session_id
         FROM approvals
         WHERE id = ?
         """,
@@ -562,7 +576,7 @@ def execute_approved(approval_id: str, db: sqlite3.Connection) -> None:
     # SEC-03: HMAC Signature verification (DB tamper-resistance)
     decided_at = row["decided_at"] or ""
     signature = row["approval_signature"]
-    if not verify_approval_signature(approval_id, approved_hash or stored_hash, decided_at, signature):
+    if not verify_approval_signature(approval_id, approved_hash or stored_hash, decided_at, signature, context=_consent_context(row)):
         log_audit(
             db,
             actor="executor",

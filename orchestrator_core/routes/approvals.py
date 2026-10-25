@@ -95,15 +95,15 @@ async def get_approval(
 @router.post("/{approval_id}/approve", response_model=ApprovalStatusUpdate)
 async def approve_action(
     approval_id: str,
-    body: Optional[ApprovalApproveRequest] = None,
+    body: ApprovalApproveRequest,
     db: sqlite3.Connection = Depends(get_db_connection),
 ):
     """
     Mark a pending approval as approved.
     TOCTOU: If body.expected_hash is provided, rejects with 409 if hash mismatch.
     """
-    expected_hash = body.expected_hash if body else None
-    approve(approval_id, db, expected_hash=expected_hash)
+    expected_hash = body.expected_hash
+    approve(approval_id, db, expected_hash=expected_hash, session_id=body.session_id)
     row = db.execute(
         "SELECT id, status, action_type, payload_hash, approved_hash FROM approvals WHERE id = ?",
         (approval_id,),

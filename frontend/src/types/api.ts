@@ -31,6 +31,7 @@ export interface ApprovalRecord {
   executed_at?: string | null;
   target?: string | null;
   payload_hash?: string | null;
+  session_id?: string | null;
 }
 
 export interface PipelineStepRecord {

@@ -109,7 +109,7 @@ def _handle_operational_command(command: str, db: sqlite3.Connection, conversati
                     f"🔒 **Human Approval Required**\n\n"
                     f"The final package has been prepared and queued in the Safety Gate.\n"
                     f"- **Approval ID**: `{approval_id}`\n"
-                    f"- **Next Step**: Type `approve {approval_id}` or authorize in the **Approvals** tab."
+                    f"- **Next Step**: Review this exact action in the **Approvals** tab."
                 )
 
             output = (
@@ -154,113 +154,26 @@ def _handle_operational_command(command: str, db: sqlite3.Connection, conversati
                     preview = p.get("to_email") or p.get("subject") or p.get("command") or str(p)[:40]
                 except Exception:
                     preview = "payload"
-                table_rows.append(f"| `{r['id'][:8]}` | `{r['action_type']}` | {preview} | {r['created_at'][:19]} | `approve {r['id'][:8]}` |")
+                table_rows.append(f"| `{r['id'][:8]}` | `{r['action_type']}` | {preview} | {r['created_at'][:19]} | Review in Approvals |")
 
             output = (
                 f"🛡️ **Pending Approvals Queue ({len(rows)} pending)**\n\n"
                 f"| ID | Action Type | Details | Created At | Command |\n"
                 f"|---|---|---|---|---|\n"
                 + "\n".join(table_rows) + "\n\n"
-                f"To authorize and execute: Type **`approve <ID>`**\n"
+                f"To authorize and execute: Open **Approvals** and review the exact record\n"
                 f"To reject: Type **`reject <ID>`**"
             )
         return AgentResult(agent="approval_gate", output=output, metadata={"count": len(rows)})
 
-    # 3. Approvals - Approve
-    is_approve_command = (
-        lower.startswith("approve ")
-        or lower in ("approve", "approve email", "approve this", "yes", "confirm", "send it", "approve pending")
-    )
-    if is_approve_command:
-        target = lower.split(None, 1)[1].strip() if " " in lower else ""
-        if target in ("email", "this", "it", "pending", "the email"):
-            target = ""
-
-        if target:
-            row = db.execute(
-                "SELECT * FROM approvals WHERE (id = ? OR id LIKE ? OR id LIKE ?) AND status IN ('pending', 'approved') ORDER BY created_at DESC LIMIT 1",
-                (target, f"{target}%", f"%{target}"),
-            ).fetchone()
-        else:
-            row = db.execute(
-                "SELECT * FROM approvals WHERE status = 'pending' ORDER BY created_at DESC LIMIT 1"
-            ).fetchone()
-
-        if not row:
-            output = f"⚠️ **No Pending Approvals**: All requested actions have already been authorized and executed. Type `show approvals` to inspect history."
-            return AgentResult(agent="approval_gate", output=output, metadata={})
-
-        aid = row["id"]
-        action_type = row["action_type"]
-        p_json = row["payload_json"]
-        try:
-            payload = json.loads(p_json)
-        except Exception:
-            payload = {}
-
-        from orchestrator_core.core.approval_gate import approve, execute_approved
-        try:
-            if row["status"] == "pending":
-                approve(aid, db)
-            execute_approved(aid, db)
-
-            detail_msg = ""
-            if action_type == "send_email":
-                recip = payload.get("to_email") or payload.get("recipient") or payload.get("to") or "recipient"
-                detail_msg = f"\n- **Delivery**: Dispatched email via Gmail SMTP SSL to `{recip}`."
-            elif action_type in ("publish_hashnode", "publish_devto"):
-                detail_msg = f"\n- **Publication**: Published to external content feed."
-
-            output = (
-                f"✅ **Action Approved & Executed**\n\n"
-                f"- **Approval ID**: `{aid}`\n"
-                f"- **Action Type**: `{action_type}`\n"
-                f"- **Status**: `executed`\n"
-                f"- **Security Guarantee**: HMAC Verified & Zero Payload Tampering{detail_msg}"
-            )
-        except Exception as exc:
-            output = f"⚠️ **Execution Failed for #{aid}**: {exc}"
-
-        return AgentResult(agent="approval_gate", output=output, metadata={"approval_id": aid, "action_type": action_type})
-
-    # 4. Approvals - Reject
-    is_reject_command = (
-        lower.startswith("reject ")
-        or lower in ("reject", "reject email", "reject this", "no", "cancel action")
-    )
-    if is_reject_command:
-        target = lower.split(None, 1)[1].strip() if " " in lower else ""
-        if target in ("email", "this", "it", "pending", "the email"):
-            target = ""
-
-        if target:
-            row = db.execute(
-                "SELECT * FROM approvals WHERE (id = ? OR id LIKE ? OR id LIKE ?) AND status = 'pending' ORDER BY created_at DESC LIMIT 1",
-                (target, f"{target}%", f"%{target}"),
-            ).fetchone()
-        else:
-            row = db.execute(
-                "SELECT * FROM approvals WHERE status = 'pending' ORDER BY created_at DESC LIMIT 1"
-            ).fetchone()
-
-        if not row:
-            output = f"⚠️ **No Pending Approvals**: No pending approval record to reject. Type `show approvals` to see active items."
-            return AgentResult(agent="approval_gate", output=output, metadata={})
-
-        aid = row["id"]
-        from orchestrator_core.core.approval_gate import reject
-        try:
-            reject(aid, db)
-            output = (
-                f"❌ **Action Rejected**\n\n"
-                f"- **Approval ID**: `{aid}`\n"
-                f"- **Status**: `rejected`\n"
-                f"- **Audit Record**: Logged to immutable audit trail."
-            )
-        except Exception as exc:
-            output = f"⚠️ **Reject Failed for #{aid}**: {exc}"
-
-        return AgentResult(agent="approval_gate", output=output, metadata={"approval_id": aid})
+    # Chat never chooses a proposal implicitly or mutates approval state.
+    if (lower.startswith(("approve", "reject"))
+            or lower in ("yes", "confirm", "send it", "no", "cancel action")):
+        return AgentResult(
+            agent="approval_gate",
+            output="Open Approvals and review the exact action, target, payload, hash and expiration before deciding.",
+            metadata={"status": "review_required"},
+        )
 
     # 5. Quick Status
     if lower in ("quick status", "system status", "status", "cluster status"):
