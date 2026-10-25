@@ -293,10 +293,10 @@ export const api = {
     return request<{ items: ApprovalRecord[]; total: number }>(`/approvals${q}`);
   },
 
-  approve: (approvalId: string, expectedHash?: string) =>
+  approve: (approvalId: string, expectedHash: string, sessionId?: string | null) =>
     request<{ id: string; status: string }>(`/approvals/${approvalId}/approve`, {
       method: 'POST',
-      body: expectedHash ? JSON.stringify({ expected_hash: expectedHash }) : undefined,
+      body: JSON.stringify({ expected_hash: expectedHash, session_id: sessionId ?? null }),
     }),
 
   reject: (approvalId: string) =>

@@ -138,10 +138,14 @@ def test_delete_conversation_cascades(client_with_clean_db):
 
 def test_dispatch_stream_endpoint(client_with_clean_db):
     """POST /dispatch/stream should stream SSE events (meta, token, done) (§5c)."""
-    res = client_with_clean_db.post(
-        "/dispatch/stream",
-        json={"command": "Hello Toji streaming test", "conversation_id": "stream-chat-1"},
-    )
+    from unittest.mock import patch
+    from orchestrator_core.models import RouterResult
+    with patch("orchestrator_core.routes.dispatch.classify",
+               return_value=RouterResult(agent="general_chat_agent", confidence=1.0, reasoning="test")):
+        res = client_with_clean_db.post(
+            "/dispatch/stream",
+            json={"command": "Hello Toji streaming test", "conversation_id": "stream-chat-1"},
+        )
     assert res.status_code == 200
     assert "text/event-stream" in res.headers["content-type"]
     text = res.text

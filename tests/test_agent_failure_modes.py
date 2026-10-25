@@ -408,9 +408,9 @@ def test_enforcement_blocks_dispatch_for_disabled_agent(
     # Disable email_agent
     client.patch("/agents/email_agent", json={"is_active": False})
 
-    resp = client.post(
-        "/dispatch",
-        json={"command": "check my unread emails and inbox"},
-    )
+    from orchestrator_core.models import RouterResult
+    with patch("orchestrator_core.routes.dispatch.classify",
+               return_value=RouterResult(agent="email_agent", confidence=1.0, reasoning="test")):
+        resp = client.post("/dispatch", json={"command": "check my unread emails and inbox"})
     assert resp.status_code == 403
     assert resp.json()["error"] == "AGENT_DISABLED"

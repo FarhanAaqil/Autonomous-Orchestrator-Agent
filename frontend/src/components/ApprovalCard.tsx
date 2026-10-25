@@ -23,7 +23,7 @@ export const ApprovalCard: React.FC<ApprovalCardProps> = ({
   onExecute,
   isActionLoading = false,
 }) => {
-  const [showPayload, setShowPayload] = useState(false);
+  const [showPayload, setShowPayload] = useState(true);
 
   let formattedPayload = approval.payload_json;
   try {
@@ -67,6 +67,12 @@ export const ApprovalCard: React.FC<ApprovalCardProps> = ({
         )}
       </div>
 
+      <div className="text-xs break-all">
+        <p>Mode: {approval.execution_mode}</p>
+        <p>Target: {approval.target}</p>
+        <p>Hash: {approval.payload_hash}</p>
+        <p>Expires: {approval.expires_at}</p>
+      </div>
       {/* Action Buttons */}
       <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-surface-muted/10">
         {isPending && (

@@ -11,6 +11,7 @@ READ / WRITE SPLIT CONTRACT:
 from __future__ import annotations
 
 import logging
+import re
 import os
 from typing import Any, Optional
 
@@ -105,13 +106,20 @@ def handle(command: str, metadata: Optional[dict[str, Any]] = None) -> AgentResu
     lower = command.lower().strip()
     meta = dict(metadata or {})
 
+    repo_match = re.search(r"(?:https?://github\.com/)?\b([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)\b", command)
+    repo = repo_match.group(1) if repo_match else meta.get("repo")
+    write_intent = any(k in lower for k in ("create issue", "open issue", "file issue", "new issue",
+                                          "post comment", "add comment", "comment on issue", "comment on pr"))
+    if write_intent and not repo:
+        return AgentResult(agent=AGENT_NAME, output="Specify the exact owner/repository before creating a proposal.", metadata=meta)
+
     # 1. Gated Write Check: creating issues or commenting
     if any(k in lower for k in ("create issue", "open issue", "file issue", "new issue")):
         action_type = "github_create_issue"
         # Generate issue title and body via LLM
         issue_prompt = f"Extract or draft a GitHub issue title and body from this command: {command}. Format as:\nTitle: <title>\n\n<body>"
         issue_text = _call_llm(issue_prompt)
-        payload = {"command": command, "draft": issue_text}
+        payload = {"repo": repo, "title": issue_text.splitlines()[0].removeprefix("Title:").strip(), "body": issue_text}
         meta["approval_payload"] = payload
         meta["action_type"] = action_type
         return AgentResult(
@@ -127,8 +135,11 @@ def handle(command: str, metadata: Optional[dict[str, Any]] = None) -> AgentResu
 
     if any(k in lower for k in ("post comment", "add comment", "comment on issue", "comment on pr")):
         action_type = "github_comment"
+        number = re.search(r"(?:issues/|pull/|issue\s*#?|pr\s*#?|#)(\d+)", lower)
+        if not number:
+            return AgentResult(agent=AGENT_NAME, output="Specify the issue or pull request number before creating a proposal.", metadata=meta)
         comment_text = _call_llm(f"Draft a technical PR/Issue comment for: {command}")
-        payload = {"command": command, "comment": comment_text}
+        payload = {"repo": repo, "issue_number": int(number.group(1)), "body": comment_text}
         meta["approval_payload"] = payload
         meta["action_type"] = action_type
         return AgentResult(

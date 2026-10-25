@@ -25,12 +25,14 @@ export interface ApprovalRecord {
   id: string;
   action_type: string;
   payload_json: string;
-  status: 'pending' | 'approved' | 'rejected' | 'executing' | 'executed' | 'expired' | 'superseded';
+  status: 'pending' | 'approved' | 'rejected' | 'executing' | 'executed' | 'expired' | 'superseded' | 'simulated' | 'submitted' | 'confirmed' | 'failed' | 'outcome_unknown';
   created_at: string;
   expires_at?: string | null;
   executed_at?: string | null;
   target?: string | null;
+  execution_mode?: "disabled" | "simulation" | "live";
   payload_hash?: string | null;
+  session_id?: string | null;
 }
 
 export interface PipelineStepRecord {

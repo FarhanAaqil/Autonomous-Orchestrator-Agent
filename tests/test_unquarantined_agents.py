@@ -62,7 +62,7 @@ def test_github_agent_list_repos_free_read():
 def test_github_agent_create_issue_gated_write():
     """Creating a GitHub issue must be gated behind approval."""
     with patch("orchestrator_core.agents.github_agent._call_llm", return_value="Title: Fix bug\n\nBug details"):
-        result = github_agent.handle("create issue on repo about memory leak")
+        result = github_agent.handle("create issue on owner/repo about memory leak")
         assert result.agent == "github_agent"
         assert result.action_type == "github_create_issue"
         assert "Requires Approval" in result.output

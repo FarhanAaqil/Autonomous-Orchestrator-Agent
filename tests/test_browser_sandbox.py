@@ -174,7 +174,8 @@ def test_sandbox_assert_read_only_action():
         assert_read_only_action("post")
 
 
-def test_sandbox_content_size_truncation():
+def test_sandbox_content_size_truncation(monkeypatch):
+    monkeypatch.setenv("SANDBOX_ALLOW_LOCAL", "true")
     """Assert that page responses exceeding max_bytes are truncated with a disclosure notice."""
     client = SandboxBrowserClient()
 

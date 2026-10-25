@@ -8,8 +8,15 @@ on:
 
 jobs:
   test:
-    name: Lint & Test Suite
+    name: Phase 1 Security Gate
     runs-on: ubuntu-latest
+    env:
+      ENVIRONMENT: development
+      ALLOW_INSECURE_LOCAL: "true"
+      ACTION_EXECUTION_MODE: simulation
+      ENABLE_REAL_EMAIL: "false"
+      EXECUTOR_HMAC_SECRET: ci-only-signing-secret-with-32-characters
+      GROQ_API_KEY: ""
 
     steps:
       - name: Checkout repository
@@ -48,9 +55,19 @@ jobs:
         run: |
           pytest tests/test_no_sdk_leakage.py -v
 
-      - name: Run test suite (excluding live LLM)
+      # The complete suite is the Phase 4 release gate. Keep this gate focused on
+      # consent, action policy, outcome truthfulness, and network boundaries.
+      - name: Run Phase 1 security regressions
         run: |
-          pytest -m "not real_llm" -v
+          pytest -v \
+            tests/test_phase1_contracts.py \
+            tests/test_phase1_security.py \
+            tests/test_phase1_policy.py \
+            tests/test_phase1_consent.py \
+            tests/test_phase1_atomic.py \
+            tests/test_phase1_outcomes.py \
+            tests/test_phase1_network.py \
+            tests/test_phase1_exit.py
 
       - name: Router Eval CI Gate (Frozen Test Split)
         run: |

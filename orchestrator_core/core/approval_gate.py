@@ -31,10 +31,14 @@ import json
 import logging
 import sqlite3
 import uuid
+import inspect
+from functools import wraps
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from orchestrator_core.config import get_settings
+from orchestrator_core.core.action_catalog import normalize_action, require_adapter
+from orchestrator_core.core.policy import execution_origin, require_execution
 from orchestrator_core.exceptions import (
     ApprovalAlreadyExecutedError,
     ApprovalClaimConflictError,
@@ -70,6 +74,7 @@ def compute_payload_hash(
     action_type: str,
     payload: dict[str, Any] | str,
     target: Optional[str] = None,
+    execution_mode: Optional[str] = None,
 ) -> str:
     """
     Compute deterministic SHA-256 hash across action_type, target, and canonical payload JSON.
@@ -81,7 +86,7 @@ def compute_payload_hash(
         payload_dict = payload
     canonical_json = json.dumps(payload_dict, separators=(",", ":"), sort_keys=True)
     target_str = target or ""
-    canonical_input = f"{action_type}:{target_str}:{canonical_json}"
+    canonical_input = f"{action_type}:{target_str}:{canonical_json}:{execution_mode or ''}"
     return hashlib.sha256(canonical_input.encode("utf-8")).hexdigest()
 
 
@@ -105,6 +110,7 @@ def generate_approval_signature(
     approved_hash: str,
     decided_at: str,
     secret: Optional[str] = None,
+    context: str = "",
 ) -> str:
     """
     HMAC-SHA256 signature over (approval_id, approved_hash, decided_at).
@@ -112,7 +118,7 @@ def generate_approval_signature(
     """
     if secret is None:
         secret = get_settings().executor_hmac_secret
-    message = f"{approval_id}:{approved_hash}:{decided_at}".encode("utf-8")
+    message = f"{approval_id}:{approved_hash}:{decided_at}:{context}".encode("utf-8")
     return hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
 
 
@@ -122,11 +128,12 @@ def verify_approval_signature(
     decided_at: str,
     signature: Optional[str],
     secret: Optional[str] = None,
+    context: str = "",
 ) -> bool:
     """Verify HMAC signature against expected secret."""
     if not signature:
         return False
-    expected = generate_approval_signature(approval_id, approved_hash, decided_at, secret)
+    expected = generate_approval_signature(approval_id, approved_hash, decided_at, secret, context)
     return hmac.compare_digest(expected, signature)
 
 
@@ -157,7 +164,7 @@ def evaluate_target_policy(
 
     # Check prior successful executions
     prior = db.execute(
-        "SELECT 1 FROM approvals WHERE target = ? AND status = 'executed' LIMIT 1",
+        "SELECT 1 FROM approvals WHERE target = ? AND status = 'confirmed' LIMIT 1",
         (target,),
     ).fetchone()
 
@@ -173,6 +180,25 @@ def evaluate_target_policy(
 
 # ── Request ────────────────────────────────────────────────────────────────────
 
+def atomic_decision(fn):
+    """Serialize decision reads and writes; audit inserts join this transaction."""
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        db = inspect.signature(fn).bind(*args, **kwargs).arguments["db"]
+        if db.in_transaction:
+            raise RuntimeError("Approval decisions require a clean transaction boundary.")
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            result = fn(*args, **kwargs)
+            db.commit()
+            return result
+        except BaseException:
+            db.rollback()
+            raise
+    return wrapped
+
+
+@atomic_decision
 def request_approval(
     action_type: str,
     payload: dict[str, Any],
@@ -180,6 +206,8 @@ def request_approval(
     expiry_hours: int = _DEFAULT_EXPIRY_HOURS,
     target: Optional[str] = None,
     idempotency_key: Optional[str] = None,
+    source_agent: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> str:
     """
     Queue an action for human review.
@@ -187,17 +215,22 @@ def request_approval(
     Inserts a 'pending' row into the approvals table and returns the approval_id.
     Stores canonical payload and bound payload_hash.
     """
-    if target is None:
-        target = extract_target(action_type, payload)
+    action_type, payload, target = normalize_action(action_type, payload, target)
+    origin_agent, origin_session = execution_origin.get()
+    source_agent = source_agent or origin_agent
+    session_id = session_id or origin_session
+    require_execution(db, source_agent, action_type)
 
     # SEC-04 Idempotent request resolution
     if idempotency_key is not None:
         existing = db.execute(
-            "SELECT id, status FROM approvals WHERE idempotency_key = ?",
+            "SELECT * FROM approvals WHERE idempotency_key = ?",
             (idempotency_key,),
         ).fetchone()
         if existing:
-            if existing["status"] == "executed":
+            if (existing["status"] not in ("pending", "approved")
+                    or existing["payload_hash"] != compute_payload_hash(action_type, payload, target, get_settings().action_execution_mode)
+                    or existing["source_agent"] != source_agent or existing["session_id"] != session_id):
                 raise IdempotencyConflictError(idempotency_key)
             return existing["id"]
 
@@ -208,31 +241,33 @@ def request_approval(
 
     approval_id = str(uuid.uuid4())
     payload_json = json.dumps(payload, separators=(",", ":"), sort_keys=True)
-    payload_hash = compute_payload_hash(action_type, payload, target)
+    payload_hash = compute_payload_hash(action_type, payload, target, get_settings().action_execution_mode)
     idempotency_key = idempotency_key or f"idem_{approval_id}"
     created_at = datetime.now(timezone.utc)
     expires_at = created_at + timedelta(hours=expiry_hours)
 
-    with db:
-        db.execute(
-            """
-            INSERT INTO approvals (
-                id, action_type, payload_json, target, payload_hash,
-                status, idempotency_key, created_at, expires_at
-            )
-            VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)
-            """,
-            (
-                approval_id,
-                action_type,
-                payload_json,
-                target,
-                payload_hash,
-                idempotency_key,
-                created_at.isoformat(),
-                expires_at.isoformat(),
-            ),
+    db.execute(
+        """
+        INSERT INTO approvals (
+            id, action_type, payload_json, target, payload_hash,
+            status, idempotency_key, created_at, expires_at, source_agent, session_id, execution_mode
         )
+        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            approval_id,
+            action_type,
+            payload_json,
+            target,
+            payload_hash,
+            idempotency_key,
+            created_at.isoformat(),
+            expires_at.isoformat(),
+            source_agent,
+            session_id,
+            get_settings().action_execution_mode,
+        ),
+    )
 
     log_audit(
         db,
@@ -258,10 +293,16 @@ def request_approval(
 
 # ── State transitions ──────────────────────────────────────────────────────────
 
+def _consent_context(row) -> str:
+    return json.dumps([row["source_agent"], row["session_id"], row["expires_at"], row["execution_mode"]], separators=(",", ":"))
+
+
+@atomic_decision
 def approve(
     approval_id: str,
     db: sqlite3.Connection,
     expected_hash: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> None:
     """
     Transition a pending approval to 'approved' state.
@@ -270,7 +311,7 @@ def approve(
     SEC-03: Computes and persists HMAC signature with server secret.
     """
     row = db.execute(
-        "SELECT id, action_type, payload_json, target, payload_hash, status FROM approvals WHERE id = ?",
+        "SELECT * FROM approvals WHERE id = ?",
         (approval_id,),
     ).fetchone()
 
@@ -283,11 +324,16 @@ def approve(
 
     # TOCTOU check against displayed expected_hash
     stored_hash = row["payload_hash"]
-    if expected_hash is not None and expected_hash != stored_hash:
+    if not expected_hash or expected_hash != stored_hash:
         raise ApprovalHashMismatchError(approval_id, expected_hash, stored_hash)
 
+    if session_id != row["session_id"]:
+        raise SecurityPolicyViolationError("Review belongs to a different conversation.")
+    if not row["expires_at"] or datetime.fromisoformat(row["expires_at"]) <= datetime.now(timezone.utc):
+        raise ApprovalExpiredError(approval_id)
+
     # SEC-02 Integrity check: recalculate hash from raw DB content
-    recomputed_hash = compute_payload_hash(row["action_type"], row["payload_json"], row["target"])
+    recomputed_hash = compute_payload_hash(row["action_type"], row["payload_json"], row["target"], row["execution_mode"])
     if recomputed_hash != stored_hash:
         log_audit(
             db,
@@ -300,22 +346,22 @@ def approve(
         raise ApprovalTamperedError(approval_id)
 
     # SEC-03: Sign approval with HMAC
+    require_adapter(row["action_type"])
     decided_at = datetime.now(timezone.utc).isoformat()
     approved_hash = stored_hash
-    signature = generate_approval_signature(approval_id, approved_hash, decided_at)
+    signature = generate_approval_signature(approval_id, approved_hash, decided_at, context=_consent_context(row))
 
-    with db:
-        db.execute(
-            """
-            UPDATE approvals
-            SET status = 'approved',
-                decided_at = ?,
-                approved_hash = ?,
-                approval_signature = ?
-            WHERE id = ? AND status = 'pending'
-            """,
-            (decided_at, approved_hash, signature, approval_id),
-        )
+    db.execute(
+        """
+        UPDATE approvals
+        SET status = 'approved', version = version + 1,
+            decided_at = ?,
+            approved_hash = ?,
+            approval_signature = ?
+        WHERE id = ? AND status = 'pending'
+        """,
+        (decided_at, approved_hash, signature, approval_id),
+    )
 
     log_audit(
         db,
@@ -328,6 +374,7 @@ def approve(
     logger.info("Approval approved — id=%s hash=%s", approval_id, approved_hash)
 
 
+@atomic_decision
 def reject(approval_id: str, db: sqlite3.Connection, reason: Optional[str] = None) -> None:
     """Transition a pending approval to 'rejected' state."""
     row = db.execute(
@@ -342,11 +389,10 @@ def reject(approval_id: str, db: sqlite3.Connection, reason: Optional[str] = Non
         raise ApprovalNotGrantedError(approval_id, row["status"])
 
     decided_at = datetime.now(timezone.utc).isoformat()
-    with db:
-        db.execute(
-            "UPDATE approvals SET status = 'rejected', decided_at = ? WHERE id = ? AND status = 'pending'",
-            (decided_at, approval_id),
-        )
+    db.execute(
+        "UPDATE approvals SET status = 'rejected', version = version + 1, decided_at = ? WHERE id = ? AND status = 'pending'",
+        (decided_at, approval_id),
+    )
 
     log_audit(
         db,
@@ -361,6 +407,7 @@ def reject(approval_id: str, db: sqlite3.Connection, reason: Optional[str] = Non
 
 # ── Edit and Supersede (SEC-06) ────────────────────────────────────────────────
 
+@atomic_decision
 def edit_and_supersede(
     approval_id: str,
     new_payload: dict[str, Any],
@@ -374,7 +421,7 @@ def edit_and_supersede(
     with supersedes_id set. The previous approval can never be executed.
     """
     row = db.execute(
-        "SELECT id, action_type, status, target FROM approvals WHERE id = ?",
+        "SELECT * FROM approvals WHERE id = ?",
         (approval_id,),
     ).fetchone()
 
@@ -387,7 +434,7 @@ def edit_and_supersede(
         )
 
     action_type = row["action_type"]
-    target = new_target or extract_target(action_type, new_payload) or row["target"]
+    action_type, new_payload, target = normalize_action(action_type, new_payload, new_target)
 
     # SEC-08 Policy check
     policy = evaluate_target_policy(action_type, target, db)
@@ -396,38 +443,40 @@ def edit_and_supersede(
 
     new_id = str(uuid.uuid4())
     new_payload_json = json.dumps(new_payload, separators=(",", ":"), sort_keys=True)
-    new_payload_hash = compute_payload_hash(action_type, new_payload, target)
+    new_payload_hash = compute_payload_hash(action_type, new_payload, target, get_settings().action_execution_mode)
     new_idempotency_key = f"idem_{new_id}"
     created_at = datetime.now(timezone.utc)
     expires_at = created_at + timedelta(hours=expiry_hours)
 
-    with db:
-        # 1. Supersede old approval
-        db.execute(
-            "UPDATE approvals SET status = 'superseded' WHERE id = ?",
-            (approval_id,),
+    # 1. Supersede old approval
+    db.execute(
+        "UPDATE approvals SET status = 'superseded', version = version + 1 WHERE id = ? AND status IN ('pending', 'approved')",
+        (approval_id,),
+    )
+    # 2. Insert new pending approval
+    db.execute(
+        """
+        INSERT INTO approvals (
+            id, action_type, payload_json, target, payload_hash,
+            status, idempotency_key, supersedes_id, created_at, expires_at, source_agent, session_id, execution_mode
         )
-        # 2. Insert new pending approval
-        db.execute(
-            """
-            INSERT INTO approvals (
-                id, action_type, payload_json, target, payload_hash,
-                status, idempotency_key, supersedes_id, created_at, expires_at
-            )
-            VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
-            """,
-            (
-                new_id,
-                action_type,
-                new_payload_json,
-                target,
-                new_payload_hash,
-                new_idempotency_key,
-                approval_id,
-                created_at.isoformat(),
-                expires_at.isoformat(),
-            ),
-        )
+        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            new_id,
+            action_type,
+            new_payload_json,
+            target,
+            new_payload_hash,
+            new_idempotency_key,
+            approval_id,
+            created_at.isoformat(),
+            expires_at.isoformat(),
+            row["source_agent"],
+            row["session_id"],
+            get_settings().action_execution_mode,
+        ),
+    )
 
     log_audit(
         db,
@@ -458,7 +507,20 @@ def edit_and_supersede(
 
 # ── Execute ────────────────────────────────────────────────────────────────────
 
-def execute_approved(approval_id: str, db: sqlite3.Connection) -> None:
+def _transition(db, row, status, event, **fields):
+    fields.update(status=status, version=row["version"] + 1)
+    assignments = ", ".join(f"{key}=?" for key in fields)
+    with db:
+        changed = db.execute(
+            f"UPDATE approvals SET {assignments} WHERE id=? AND status=? AND version=?",
+            (*fields.values(), row["id"], row["status"], row["version"]),
+        )
+        if changed.rowcount != 1:
+            raise ApprovalClaimConflictError(row["id"])
+        log_audit(db, actor="executor", event=event, entity_id=row["id"], detail={"status": status})
+
+
+def execute_approved(approval_id: str, db: sqlite3.Connection) -> dict:
     """
     Execute the stored action for an approved record.
 
@@ -474,7 +536,7 @@ def execute_approved(approval_id: str, db: sqlite3.Connection) -> None:
     row = db.execute(
         """
         SELECT id, action_type, payload_json, target, payload_hash, status,
-               idempotency_key, approval_signature, approved_hash, decided_at, expires_at
+               idempotency_key, approval_signature, approved_hash, decided_at, expires_at, source_agent, session_id, version, execution_mode
         FROM approvals
         WHERE id = ?
         """,
@@ -485,8 +547,9 @@ def execute_approved(approval_id: str, db: sqlite3.Connection) -> None:
         raise ApprovalNotFoundError(approval_id)
 
     status = row["status"]
+    require_execution(db, row["source_agent"] or "orchestrator", row["action_type"])
 
-    if status == "executed":
+    if status in ("executed", "simulated", "submitted", "confirmed", "failed", "outcome_unknown"):
         raise ApprovalAlreadyExecutedError(approval_id)
 
     if status == "superseded":
@@ -519,21 +582,11 @@ def execute_approved(approval_id: str, db: sqlite3.Connection) -> None:
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=timezone.utc)
         if datetime.now(timezone.utc) > expires_at:
-            with db:
-                db.execute(
-                    "UPDATE approvals SET status = 'expired' WHERE id = ?", (approval_id,)
-                )
-            log_audit(
-                db,
-                actor="executor",
-                event="approval_expired_rejected",
-                entity="approval",
-                entity_id=approval_id,
-            )
+            _transition(db, row, "expired", "approval_expired_rejected")
             raise ApprovalExpiredError(approval_id)
 
     # SEC-02: Cryptographic payload hash integrity check
-    recomputed_hash = compute_payload_hash(row["action_type"], row["payload_json"], row["target"])
+    recomputed_hash = compute_payload_hash(row["action_type"], row["payload_json"], row["target"], row["execution_mode"])
     stored_hash = row["payload_hash"]
     approved_hash = row["approved_hash"]
 
@@ -551,7 +604,7 @@ def execute_approved(approval_id: str, db: sqlite3.Connection) -> None:
     # SEC-03: HMAC Signature verification (DB tamper-resistance)
     decided_at = row["decided_at"] or ""
     signature = row["approval_signature"]
-    if not verify_approval_signature(approval_id, approved_hash or stored_hash, decided_at, signature):
+    if not verify_approval_signature(approval_id, approved_hash or stored_hash, decided_at, signature, context=_consent_context(row)):
         log_audit(
             db,
             actor="executor",
@@ -562,162 +615,121 @@ def execute_approved(approval_id: str, db: sqlite3.Connection) -> None:
         )
         raise ApprovalSignatureInvalidError(approval_id)
 
-    # Atomic compare-and-set: transition approved → executing
+    if row["execution_mode"] != get_settings().action_execution_mode:
+        raise SecurityPolicyViolationError("Execution mode changed; edit and review a new proposal.")
+    attempt_id = str(uuid.uuid4())
+    started_at = datetime.now(timezone.utc).isoformat()
+    db.execute("BEGIN IMMEDIATE")
     with db:
-        cursor = db.execute(
-            "UPDATE approvals SET status = 'executing' WHERE id = ? AND status = 'approved'",
-            (approval_id,),
+        require_execution(db, row["source_agent"] or "orchestrator", row["action_type"])
+        target_policy = evaluate_target_policy(row["action_type"], row["target"], db)
+        if not target_policy["allowed"]:
+            raise SecurityPolicyViolationError(target_policy["reason"])
+        if datetime.fromisoformat(row["expires_at"]) <= datetime.now(timezone.utc):
+            raise ApprovalExpiredError(approval_id)
+        changed = db.execute(
+            "UPDATE approvals SET status='executing', version=version+1 WHERE id=? AND status='approved' AND version=?",
+            (approval_id, row["version"]),
         )
-
-    if cursor.rowcount == 0:
-        # Another concurrent call won the race
-        raise ApprovalClaimConflictError(approval_id)
-
-    log_audit(
-        db,
-        actor="executor",
-        event="execution_attempted",
-        entity="approval",
-        entity_id=approval_id,
-        detail={"action_type": row["action_type"], "idempotency_key": idempotency_key},
-    )
-    logger.info("Execution claimed — id=%s action_type=%s", approval_id, row["action_type"])
+        if changed.rowcount != 1:
+            raise ApprovalClaimConflictError(approval_id)
+        db.execute(
+            "INSERT INTO execution_attempts (id,approval_id,provider_key,outcome,started_at) VALUES (?,?,?,'outcome_unknown',?)",
+            (attempt_id, approval_id, row["idempotency_key"], started_at),
+        )
+        log_audit(db, actor="executor", event="execution_attempted", entity_id=approval_id,
+                  detail={"attempt_id": attempt_id, "provider_key": row["idempotency_key"]})
 
     try:
-        payload = json.loads(row["payload_json"])
-        _dispatch_action(
-            action_type=row["action_type"],
-            payload=payload,
-            approval_id=approval_id,
-        )
+        result = _dispatch_action(row["action_type"], json.loads(row["payload_json"]), approval_id)
+        if not isinstance(result, dict) or result.get("outcome") not in ("simulated", "submitted", "confirmed", "failed", "outcome_unknown"):
+            raise RuntimeError("Adapter returned no valid execution outcome")
     except Exception as exc:
-        log_audit(
-            db,
-            actor="executor",
-            event="execution_failed",
-            entity="approval",
-            entity_id=approval_id,
-            detail={"error": str(exc)},
-        )
-        logger.exception("Dispatch failed for approval id=%s — row left in 'executing'", approval_id)
-        raise
-
-    # Transition executing → executed
-    executed_at = datetime.now(timezone.utc).isoformat()
+        # Once dispatch has begun, an unclassified failure cannot prove no effect.
+        result = {"outcome": "outcome_unknown", "error_class": type(exc).__name__}
+    finished_at = datetime.now(timezone.utc).isoformat()
     with db:
+        changed = db.execute(
+            "UPDATE approvals SET status=?, executed_at=?, version=version+1 WHERE id=? AND status='executing' AND version=?",
+            (result["outcome"], finished_at, approval_id, row["version"] + 1),
+        )
+        if changed.rowcount != 1:
+            raise ApprovalClaimConflictError(approval_id)
         db.execute(
-            "UPDATE approvals SET status = 'executed', executed_at = ? WHERE id = ?",
-            (executed_at, approval_id),
+            "UPDATE execution_attempts SET outcome=?, finished_at=?, receipt_json=?, error_class=? WHERE id=?",
+            (result["outcome"], finished_at, json.dumps(result.get("receipt", {})), result.get("error_class"), attempt_id),
         )
+        log_audit(db, actor="executor", event="execution_outcome", entity_id=approval_id, detail=result)
+    return {"approval_id": approval_id, "attempt_id": attempt_id, "status": result["outcome"], **result}
 
-    log_audit(
-        db,
-        actor="executor",
-        event="execution_succeeded",
-        entity="approval",
-        entity_id=approval_id,
-        detail={"executed_at": executed_at, "idempotency_key": idempotency_key},
+
+@atomic_decision
+def reconcile_execution(approval_id, outcome, evidence, db):
+    """Owner records independently verified evidence; never resends an action."""
+    if outcome not in ("confirmed", "failed") or len(evidence.strip()) < 10:
+        raise SecurityPolicyViolationError("Reconciliation requires confirmed/failed and specific provider evidence.")
+    row = db.execute("SELECT * FROM execution_attempts WHERE approval_id=?", (approval_id,)).fetchone()
+    if row is None or row["outcome"] not in ("submitted", "outcome_unknown"):
+        raise SecurityPolicyViolationError("Only submitted or uncertain attempts can be reconciled.")
+    if row["finished_at"] is None:
+        age = datetime.now(timezone.utc) - datetime.fromisoformat(row["started_at"])
+        if age.total_seconds() < 300:
+            raise SecurityPolicyViolationError("The execution may still be active; wait at least five minutes.")
+    now = datetime.now(timezone.utc).isoformat()
+    changed = db.execute(
+        "UPDATE approvals SET status=?, version=version+1 WHERE id=? AND status IN ('executing','submitted','outcome_unknown')",
+        (outcome, approval_id),
     )
-    logger.info("Execution complete — id=%s executed_at=%s", approval_id, executed_at)
+    if changed.rowcount != 1:
+        raise ApprovalClaimConflictError(approval_id)
+    db.execute("UPDATE execution_attempts SET outcome=?, finished_at=?, receipt_json=? WHERE approval_id=?",
+               (outcome, now, json.dumps({"owner_evidence": evidence}), approval_id))
+    log_audit(db, actor="owner", event="execution_reconciled", entity_id=approval_id,
+              detail={"outcome": outcome, "evidence": evidence})
+    return {"approval_id": approval_id, "status": outcome}
 
 
-# ── Dispatch action (SDK_EXECUTOR) ─────────────────────────────────────────────
-# This is the ONLY function in the codebase allowed to import email/publish SDKs.
-# All SDK imports MUST be inside this function body, not at module level.
-# Enforced by CI grep: `grep -r "smtplib\|hashnode\|devto" orchestrator_core/`
-# must return only this file.
 
-def _dispatch_action(
-    action_type: str,
-    payload: dict[str, Any],
-    approval_id: str,
-) -> None:
-    """
-    Execute the external action — email send or content publish.
+def _dispatch_action(action_type: str, payload: dict[str, Any], approval_id: str) -> dict:
+    """SDK_EXECUTOR: report SMTP acceptance, never infer inbox delivery."""
+    require_adapter(action_type)
+    action_type, payload, _ = normalize_action(action_type, payload)
+    settings = get_settings()
+    if settings.action_execution_mode == "disabled":
+        return {"outcome": "failed", "error_class": "ExecutionDisabled"}
+    if settings.action_execution_mode == "simulation":
+        return {"outcome": "simulated", "receipt": {"mode": "simulation", "external_effect": False}}
+    if not (settings.enable_real_email and settings.email_address and settings.email_app_password):
+        return {"outcome": "failed", "error_class": "MissingCredentials"}
+    import smtplib
+    from email.mime.text import MIMEText
 
-    STUB: SDK calls are replaced with audit log entries until the
-    real SDK integrations are wired in (post-Phase 4 sprint).
-
-    Every invocation is fully auditable:
-      - timestamp (UTC ISO)
-      - action_type
-      - payload_hash (SHA-256 of canonical JSON)
-      - approval_id (traceability back to the DB row)
-
-    # SDK_EXECUTOR: do not import email/publish SDKs elsewhere.
-    """
-    payload_json = json.dumps(payload, separators=(",", ":"), sort_keys=True)
-    payload_hash = hashlib.sha256(payload_json.encode()).hexdigest()[:16]
-    timestamp = datetime.now(timezone.utc).isoformat()
-
-    audit_record = {
-        "timestamp": timestamp,
-        "approval_id": approval_id,
-        "action_type": action_type,
-        "payload_hash": payload_hash,
-        "status": "stub_executed",
-    }
-
-    logger.info("AUDIT | _dispatch_action | %s", json.dumps(audit_record))
-
-    # Action dispatch branches
-    if action_type == "send_email":
-        import os
-        from orchestrator_core.config import get_settings
-        settings = get_settings()
-        email_addr = os.getenv("EMAIL_ADDRESS") or settings.email_address
-        email_pass = os.getenv("EMAIL_APP_PASSWORD") or settings.email_app_password
-        to_email = payload.get("to_email") or payload.get("recipient") or payload.get("to")
-        subject = payload.get("subject", "Orchestrator Notification")
-        body = payload.get("body", "")
-
-        is_test = bool(os.getenv("PYTEST_CURRENT_TEST"))
-        enable_real = (
-            os.getenv("ENABLE_REAL_EMAIL", "").lower() in ("true", "1")
-            or getattr(settings, "enable_real_email", False)
-        )
-        # Block dummy or reserved test domains from real SMTP dispatch
-        dummy_domains = ("example.com", "example.org", "example.net", "company.org", "test.com", "localhost")
-        recipient_domain = str(to_email).split("@")[-1].lower() if "@" in str(to_email) else ""
-        is_dummy_target = any(recipient_domain == d or recipient_domain.endswith("." + d) for d in dummy_domains)
-
-        if not is_test and enable_real and not is_dummy_target and email_addr and email_pass and to_email and "your_email" not in str(email_addr):
-            try:
-                import smtplib
-                from email.mime.text import MIMEText
-
-                clean_to = str(to_email).strip()
-                msg = MIMEText(body, "plain", "utf-8")
-                msg["Subject"] = subject
-                msg["From"] = email_addr
-                msg["To"] = clean_to
-                with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20) as server:
-                    server.login(email_addr, email_pass)
-                    server.send_message(msg)
-                logger.info("Real SMTP sent email to %s via %s", clean_to, email_addr)
-            except Exception as exc:
-                logger.error("SMTP send attempt failed: %s", exc)
-                raise RuntimeError(f"SMTP delivery failed: {exc}")
-        else:
-            logger.info(
-                "Email action logged (safe simulation / stub mode). to=%s enable_real=%s is_test=%s is_dummy=%s payload_hash=%s",
-                to_email,
-                enable_real,
-                is_test,
-                is_dummy_target,
-                payload_hash,
-            )
-    elif action_type == "publish_hashnode":
-        logger.info("Executed publish_hashnode. payload_hash=%s", payload_hash)
-    elif action_type == "publish_devto":
-        logger.info("Executed publish_devto. payload_hash=%s", payload_hash)
-    elif action_type == "github_create_issue":
-        logger.info("Executed github_create_issue. payload_hash=%s", payload_hash)
-    elif action_type == "github_comment":
-        logger.info("Executed github_comment. payload_hash=%s", payload_hash)
-    elif action_type == "linkedin_post":
-        logger.info("Executed linkedin_post. payload_hash=%s", payload_hash)
-    elif action_type == "linkedin_connect":
-        logger.info("Executed linkedin_connect. payload_hash=%s", payload_hash)
-    else:
-        logger.warning("Unknown action_type=%r. payload_hash=%s", action_type, payload_hash)
+    msg = MIMEText(payload["body"], "plain", "utf-8")
+    msg["Subject"] = payload["subject"]
+    msg["From"] = settings.email_address
+    msg["To"] = payload["to_email"]
+    # Stable correlation identifier. SMTP does NOT promise deduplication for it.
+    msg["Message-ID"] = f"<{approval_id}@orchestrator.local>"
+    server = None
+    try:
+        server = smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20)
+        server.login(settings.email_address, settings.email_app_password)
+    except Exception as exc:
+        if server is not None:
+            server.close()
+        return {"outcome": "failed", "error_class": type(exc).__name__}
+    try:
+        refused = server.send_message(msg)
+        if refused:
+            return {"outcome": "failed", "error_class": "RecipientRefused"}
+        return {"outcome": "submitted", "receipt": {"message_id": msg["Message-ID"], "provider": "smtp.gmail.com"}}
+    except (smtplib.SMTPRecipientsRefused, smtplib.SMTPSenderRefused, smtplib.SMTPDataError) as exc:
+        return {"outcome": "failed", "error_class": type(exc).__name__}
+    except Exception as exc:
+        return {"outcome": "outcome_unknown", "error_class": type(exc).__name__}
+    finally:
+        # A failure to close cannot change the provider acceptance already observed.
+        try:
+            server.close()
+        except Exception:
+            logger.warning("SMTP connection cleanup failed")

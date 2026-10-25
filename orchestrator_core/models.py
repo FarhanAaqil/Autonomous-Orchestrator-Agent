@@ -69,7 +69,7 @@ class ApprovalRecord(BaseModel):
     payload_json: str      # JSON string — immutable after creation
     target: Optional[str] = None
     payload_hash: Optional[str] = None
-    status: Literal["pending", "approved", "rejected", "executing", "executed", "expired", "superseded"]
+    status: Literal["pending", "approved", "rejected", "executing", "executed", "expired", "superseded", "simulated", "submitted", "confirmed", "failed", "outcome_unknown"]
     idempotency_key: Optional[str] = None
     approval_signature: Optional[str] = None
     approved_hash: Optional[str] = None
@@ -78,6 +78,9 @@ class ApprovalRecord(BaseModel):
     decided_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
     executed_at: Optional[datetime] = None
+    execution_mode: Literal["disabled", "simulation", "live"] = "disabled"
+    source_agent: Optional[str] = None
+    session_id: Optional[str] = None
 
 
 class ApprovalRequest(BaseModel):
@@ -90,7 +93,8 @@ class ApprovalRequest(BaseModel):
 
 class ApprovalApproveRequest(BaseModel):
     """Body for POST /approvals/{id}/approve with TOCTOU expected_hash validation."""
-    expected_hash: Optional[str] = None
+    expected_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    session_id: Optional[str] = None
 
 
 class ApprovalRejectRequest(BaseModel):

@@ -180,15 +180,16 @@ def test_assert_safe_method():
 
 def test_safe_get_payload_size_limit():
     """Verify that safe_get aborts on oversized payloads."""
-    with patch("requests.get") as mock_get, patch("orchestrator_core.tools.read.shared_client._validate_url_ssrf"):
-        mock_resp = MagicMock()
-        mock_resp.is_redirect = False
-        mock_resp.status_code = 200
-        mock_resp.headers = {"Content-Length": "2097152"}  # 2 MB
-        mock_get.return_value = mock_resp
-
+    with patch("orchestrator_core.tools.read.shared_client.urllib3.HTTPSConnectionPool") as pool, patch(
+        "orchestrator_core.tools.read.shared_client._validate_url_ssrf", return_value="93.184.216.34"
+    ):
+        raw = MagicMock()
+        raw.status = 200
+        raw.headers = {"Content-Length": "2097152"}
+        pool.return_value.urlopen.return_value = raw
         with pytest.raises(SSRFViolationError, match="exceeds maximum size"):
             safe_get("https://example.com/huge.bin", max_bytes=1024 * 1024)
+        raw.close.assert_called_once()
 
 
 # ── 3. Untrusted Data Isolation ──────────────────────────────────────────────

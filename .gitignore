@@ -94,6 +94,8 @@ AAQIL_AUTONOMOUS_AGENT_PLAN.md
 implementation_plan.md
 TODO.md
 *.scratch.*
+implementation.md
+audit.md
 
 # Runtime evaluation dump runs (historical baselines preserved)
 eval/results/20261*.json

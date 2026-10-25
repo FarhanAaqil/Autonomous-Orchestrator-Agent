@@ -157,7 +157,9 @@ def handle(command: str, metadata: Optional[dict[str, Any]] = None) -> AgentResu
 
     # Extract recipient email if present in text
     email_match = re.search(r"[\w\.-]+@[\w\.-]+\.\w+", command)
-    target_email = email_match.group(0) if email_match else meta.get("to_email", "recipient@example.com")
+    target_email = email_match.group(0) if email_match else meta.get("to_email")
+    if is_send_intent and not target_email:
+        return AgentResult(agent=AGENT_NAME, output="Specify the recipient email address before creating a proposal.", metadata=meta)
 
     # Generate draft content via LLM
     draft_prompt = f"""Based on this user command, produce a high-quality email draft:

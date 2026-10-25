@@ -1,30 +1,42 @@
-# Dockerized Browser Sandbox (Phase 9)
+# Isolated browser reads
 
-## Architecture Overview
-The Browser Sandbox provides an isolated, ephemeral web browsing environment powered by headless Chromium and Playwright. It enables agents (such as `linkedin_agent` and `career_agent`) to inspect web pages, professional profiles, and job postings without exposing host network boundaries, cookies, or secrets.
+Run from the repository root:
 
-## Security Invariants
-1. **Non-Root Execution**: Runs strictly as user `pwuser` (`uid=1001:gid=1001`).
-2. **Read-Only Root Filesystem**: The container root filesystem is mounted read-only (`read_only: true`). All temporary files use tmpfs in `/tmp` (`size=512m,noexec,nosuid`).
-3. **No Host Mounts**: Zero host volumes are mounted into the container.
-4. **Ephemeral Profiles**: Every page navigation uses a fresh browser context (`browser.new_context()`) which is immediately closed. Cookies, local storage, and history are discarded after each request.
-5. **SSRF Guard**: Blocks access to `localhost`, loopback, RFC 1918 private subnets, cloud metadata (`169.254.169.254`), and internal service discovery.
-6. **Scheme Lockdown**: Only `http://` and `https://` are permitted. All dangerous schemes (`file://`, `data:`, `about:`, `chrome://`, `javascript:`) are rejected.
-7. **Resource Ceilings**: CPU limit capped at 1.0 core, RAM capped at 1024 MB.
-8. **Read-Only Default**: Form submissions and state-mutating browser interactions are prohibited. Real-world actions must pass through `propose_action` into human approval gates.
+    docker compose -f docker/browser_sandbox/docker-compose.sandbox.yml up --build -d
 
-## Running the Container
-```bash
-# Build and run the sandbox container
-docker compose -f docker/browser_sandbox/docker-compose.sandbox.yml up -d
+Set SANDBOX_BROWSER_URL=http://127.0.0.1:8888 for a host API process. For a
+containerized API, attach it to the isolated network and use the browser service
+name; never expose the gateway port publicly.
 
-# Verify health status
-curl http://127.0.0.1:8888/health
-```
+The browser has an internal Docker network and kernel OUTPUT rules allowing only
+the read gateway. The gateway validates every URL, resolves public addresses, and
+connects to that numeric address while preserving TLS hostname verification.
+Private, metadata and nonstandard-port destinations are refused. Redirects are
+bounded to five; each response and the aggregate browser page have byte limits.
+IPv6 egress is disabled in this deployment.
 
-## Environment Configuration
-Set `SANDBOX_BROWSER_URL` in your environment to point orchestrator tools to the container:
-```bash
-export SANDBOX_BROWSER_URL=http://127.0.0.1:8888
-```
-When `SANDBOX_BROWSER_URL` is omitted, the `SandboxBrowserClient` uses the local in-process Playwright driver with identical security checks and ephemeral lifecycle.
+Page JavaScript, service workers, forms and downloads are disabled. Screenshots
+therefore render static content; this service does not support interactive sites.
+Every resource is fulfilled by the gateway. No native browser request is continued.
+POST/PUT/PATCH/DELETE are aborted and logged. GET endpoints with side effects
+cannot be identified automatically; use domain allowlists for untrusted browsing.
+
+Startup briefly needs NET_ADMIN to install firewall rules, then drops UID/GID to
+1001 and all capabilities before starting the server. Missing firewall support
+fails startup. Use the compose file; directly running server.py lacks this kernel
+boundary and is unsupported for production.
+
+A configured sandbox denial or outage propagates to the caller. Local reading is
+development-only, explicitly enabled with SANDBOX_ALLOW_LOCAL=true; it uses the
+same pinned HTTP transport, has no JavaScript and cannot take screenshots.
+
+Offline regression checks:
+
+    python scripts/test_local.py tests/test_phase1_network.py tests/test_browser_sandbox.py tests/test_tool_safety.py
+    docker compose -f docker/browser_sandbox/docker-compose.sandbox.yml config --quiet
+
+Container checks after building: inspect OUTPUT chains as root, verify the service
+runs as UID 1001 with zero effective capabilities, and attempt sockets to a public
+IP, private gateway and metadata from the browser container. Only the read gateway
+may be reachable. The gateway must refuse private URLs and non-GET/HEAD methods.
+Do not enable live external actions until deployment checks are recorded.

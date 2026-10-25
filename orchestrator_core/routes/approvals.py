@@ -22,6 +22,7 @@ from orchestrator_core.core.approval_gate import (
     reject,
     execute_approved,
     edit_and_supersede,
+    reconcile_execution,
 )
 from orchestrator_core.models import (
     ApprovalRecord,
@@ -95,15 +96,15 @@ async def get_approval(
 @router.post("/{approval_id}/approve", response_model=ApprovalStatusUpdate)
 async def approve_action(
     approval_id: str,
-    body: Optional[ApprovalApproveRequest] = None,
+    body: ApprovalApproveRequest,
     db: sqlite3.Connection = Depends(get_db_connection),
 ):
     """
     Mark a pending approval as approved.
     TOCTOU: If body.expected_hash is provided, rejects with 409 if hash mismatch.
     """
-    expected_hash = body.expected_hash if body else None
-    approve(approval_id, db, expected_hash=expected_hash)
+    expected_hash = body.expected_hash
+    approve(approval_id, db, expected_hash=expected_hash, session_id=body.session_id)
     row = db.execute(
         "SELECT id, status, action_type, payload_hash, approved_hash FROM approvals WHERE id = ?",
         (approval_id,),
@@ -157,8 +158,7 @@ async def execute_action(
     db: sqlite3.Connection = Depends(get_db_connection),
 ):
     """Execute an approved action (loads payload from DB, no caller-supplied payload)."""
-    execute_approved(approval_id, db)
-    return {"approval_id": approval_id, "status": "executed"}
+    return execute_approved(approval_id, db)
 
 
 @router.get("/{approval_id}/audit")
@@ -172,3 +172,21 @@ async def get_approval_audit_trail(
         (approval_id,),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+class ReconciliationRequest(BaseModel):
+    outcome: str
+    evidence: str
+
+
+@router.post("/{approval_id}/reconcile")
+async def reconcile_action(approval_id: str, body: ReconciliationRequest,
+                           db: sqlite3.Connection = Depends(get_db_connection)):
+    return reconcile_execution(approval_id, body.outcome, body.evidence, db)
+
+
+@router.get("/{approval_id}/attempts")
+async def execution_attempts(approval_id: str, db: sqlite3.Connection = Depends(get_db_connection)):
+    return [dict(row) for row in db.execute(
+        "SELECT * FROM execution_attempts WHERE approval_id=?", (approval_id,)
+    ).fetchall()]

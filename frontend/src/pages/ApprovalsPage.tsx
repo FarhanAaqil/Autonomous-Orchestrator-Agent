@@ -42,7 +42,9 @@ export const ApprovalsPage: React.FC = () => {
       prev.map((a) => (a.id === id ? { ...a, status: 'approved' } : a))
     );
     try {
-      await api.approve(id);
+      const reviewed = approvals.find((a) => a.id === id);
+      if (!reviewed?.payload_hash) throw new Error("Reload the proposal before approving.");
+      await api.approve(id, reviewed.payload_hash, reviewed.session_id);
     } catch (err) {
       console.error('Approve failed:', err);
       fetchApprovals();

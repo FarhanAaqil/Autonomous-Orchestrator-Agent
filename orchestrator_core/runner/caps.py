@@ -18,14 +18,13 @@ import time
 from datetime import datetime, timezone
 
 from orchestrator_core.exceptions import (
-    AgentDisabledError,
     BudgetExceededError,
     JobTimeoutError,
-    KillSwitchActiveError,
     MaxStepsExceededError,
     TokenBudgetExceededError,
 )
-from orchestrator_core.models import JobRecord, canonical_agent_name
+from orchestrator_core.models import JobRecord
+from orchestrator_core.core.policy import require_execution
 
 logger = logging.getLogger(__name__)
 
@@ -40,22 +39,7 @@ def check_guards(
     Evaluate all guardrails before step execution.
     Raises specialized JobError if any constraint is violated.
     """
-    # 0. Agent administrative status check
-    canonical_agent = canonical_agent_name(job.agent)
-    row_agent = db.execute(
-        "SELECT value FROM system_flags WHERE key IN (?, ?)",
-        (f"agent_enabled_{canonical_agent}", f"agent_enabled_{job.agent}"),
-    ).fetchall()
-    for r in row_agent:
-        if r["value"].strip() == "0":
-            logger.warning("Agent '%s' is administratively disabled. Halting job %s", job.agent, job.id)
-            raise AgentDisabledError(canonical_agent)
-
-    # 1. Kill switch check
-    row_ks = db.execute("SELECT value FROM system_flags WHERE key = 'kill_switch'").fetchone()
-    if row_ks and row_ks["value"].strip().lower() == "on":
-        logger.critical("Kill switch is ACTIVE! Aborting step execution for job %s", job.id)
-        raise KillSwitchActiveError(f"Emergency kill switch is ACTIVE. Job {job.id} halted.")
+    require_execution(db, job.agent)
 
     # 2. Daily budget check
     row_budget = db.execute("SELECT value FROM system_flags WHERE key = 'daily_budget_usd'").fetchone()

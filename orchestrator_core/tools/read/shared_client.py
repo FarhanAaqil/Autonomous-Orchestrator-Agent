@@ -17,7 +17,9 @@ import ipaddress
 import logging
 import socket
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
+import time
+import urllib3
 
 import requests
 
@@ -37,7 +39,7 @@ _DENYLISTED_HOSTS = {
 }
 
 
-def _validate_url_ssrf(url: str, allowed_domains: tuple[str, ...] = ()) -> None:
+def _validate_url_ssrf(url: str, allowed_domains: tuple[str, ...] = ()) -> str:
     """Validate that the given URL does not target loopback, private IPs, or cloud metadata."""
     parsed = urlparse(url)
     scheme = parsed.scheme.lower()
@@ -45,6 +47,10 @@ def _validate_url_ssrf(url: str, allowed_domains: tuple[str, ...] = ()) -> None:
     if scheme not in ("http", "https"):
         raise SSRFViolationError(f"Scheme '{scheme}' is not permitted. Only HTTP/HTTPS allowed.")
 
+    if parsed.username or parsed.password:
+        raise SSRFViolationError("URL credentials are forbidden")
+    if parsed.port not in (None, 80, 443):
+        raise SSRFViolationError("Only standard HTTP/HTTPS ports are permitted")
     hostname = parsed.hostname
     if not hostname:
         raise SSRFViolationError(f"URL '{url}' does not contain a valid hostname.")
@@ -72,11 +78,12 @@ def _validate_url_ssrf(url: str, allowed_domains: tuple[str, ...] = ()) -> None:
         ip_str = item[4][0]
         try:
             ip = ipaddress.ip_address(ip_str)
-        except ValueError:
-            continue
+        except ValueError as exc:
+            raise SSRFViolationError("Invalid DNS address") from exc
 
         if (
-            ip.is_private
+            not ip.is_global
+            or ip.is_private
             or ip.is_loopback
             or ip.is_link_local
             or ip.is_multicast
@@ -87,87 +94,104 @@ def _validate_url_ssrf(url: str, allowed_domains: tuple[str, ...] = ()) -> None:
                 f"Host '{hostname}' resolved to prohibited address {ip_str} (private, loopback, or link-local)."
             )
 
-
-def safe_get(
-    url: str,
-    headers: Optional[dict[str, str]] = None,
-    params: Optional[dict[str, str]] = None,
-    allowed_domains: tuple[str, ...] = (),
-    timeout_s: float = DEFAULT_TIMEOUT_S,
-    max_bytes: int = DEFAULT_MAX_BYTES,
-) -> requests.Response:
-    """
-    Execute an SSRF-safe HTTP GET request.
-    Validates target URL and IP boundaries, streams content, and aborts if max_bytes is exceeded.
-    """
-    _validate_url_ssrf(url, allowed_domains=allowed_domains)
-
-    default_headers = {
-        "User-Agent": "AaqilOrchestratorBot/1.0 (+https://github.com/FarhanAaqil/orchestrater_agent)",
-        "Accept": "*/*",
-    }
-    if headers:
-        default_headers.update(headers)
-
-    response = requests.get(
-        url,
-        headers=default_headers,
-        params=params,
-        timeout=timeout_s,
-        allow_redirects=False,
-        stream=True,
-    )
-
-    # If redirect, validate target URL recursively
-    if response.is_redirect or response.status_code in (301, 302, 303, 307, 308):
-        redirect_url = response.headers.get("Location")
-        if not redirect_url:
-            raise SSRFViolationError("Redirect response missing Location header.")
-        # Resolve relative redirect URLs if needed
-        if redirect_url.startswith("/"):
-            parsed = urlparse(url)
-            redirect_url = f"{parsed.scheme}://{parsed.netloc}{redirect_url}"
-        _validate_url_ssrf(redirect_url, allowed_domains=allowed_domains)
-        return safe_get(
-            redirect_url,
-            headers=headers,
-            params=params,
-            allowed_domains=allowed_domains,
-            timeout_s=timeout_s,
-            max_bytes=max_bytes,
-        )
-
-    # Validate size bounds
-    content_length = response.headers.get("Content-Length")
-    if content_length and content_length.isdigit() and int(content_length) > max_bytes:
-        raise SSRFViolationError(
-            f"Response payload {content_length} bytes exceeds maximum size of {max_bytes} bytes."
-        )
-
-    # Stream chunks up to max_bytes
-    chunks = []
-    total = 0
-    for chunk in response.iter_content(chunk_size=16384):
-        total += len(chunk)
-        if total > max_bytes:
-            raise SSRFViolationError(
-                f"Response exceeded maximum payload limit of {max_bytes} bytes while reading."
-            )
-        chunks.append(chunk)
-
-    response._content = b"".join(chunks)
-    return response
+    if not addr_info:
+        raise SSRFViolationError("DNS returned no usable address")
+    addresses = [item[4][0] for item in addr_info]
+    return next((addr for addr in addresses if ipaddress.ip_address(addr).version == 4), addresses[0])
 
 
-def safe_head(
-    url: str,
-    headers: Optional[dict[str, str]] = None,
-    allowed_domains: tuple[str, ...] = (),
-    timeout_s: float = DEFAULT_TIMEOUT_S,
-) -> requests.Response:
-    """Execute an SSRF-safe HTTP HEAD request."""
-    _validate_url_ssrf(url, allowed_domains=allowed_domains)
-    return requests.head(url, headers=headers, timeout=timeout_s, allow_redirects=False)
+def _safe_request(method, url, headers=None, params=None, allowed_domains=(),
+                  timeout_s=DEFAULT_TIMEOUT_S, max_bytes=DEFAULT_MAX_BYTES,
+                  max_redirects=5, denied_domains=()):
+    assert_safe_method(method)
+    if not 0 < timeout_s <= 30 or not 0 < max_bytes <= 1048576 or not 0 <= max_redirects <= 5:
+        raise SSRFViolationError("Read limits exceed policy")
+    current = requests.Request(method, url, params=params).prepare().url
+    request_headers = {"User-Agent": "OrchestratorRead/1.0", "Accept-Encoding": "identity"}
+    request_headers.update(headers or {})
+    deadline = time.monotonic() + timeout_s
+    visited = set()
+    for hop in range(max_redirects + 1):
+        if current in visited:
+            raise SSRFViolationError("Redirect loop")
+        visited.add(current)
+        parsed = urlparse(current)
+        host = (parsed.hostname or "").lower().rstrip(".")
+        denied = tuple(d.lower().strip(".") for d in denied_domains)
+        if any(host == d or host.endswith("." + d) for d in denied):
+            raise SSRFViolationError("Host is on the domain denylist")
+        address = _validate_url_ssrf(current, tuple(allowed_domains))
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise SSRFViolationError("Read deadline exceeded")
+        # Connect to the validated numeric address, never resolve the hostname again.
+        # TLS still verifies the original hostname and uses it for SNI.
+        kwargs = {"host": address, "port": parsed.port or (443 if parsed.scheme == "https" else 80),
+                  "timeout": urllib3.Timeout(connect=remaining, read=remaining), "retries": False}
+        if parsed.scheme == "https":
+            pool = urllib3.HTTPSConnectionPool(**kwargs, server_hostname=host, assert_hostname=host)
+        else:
+            pool = urllib3.HTTPConnectionPool(**kwargs)
+        outgoing = {k: v for k, v in request_headers.items() if k.lower() not in ("host", "connection", "proxy-authorization")}
+        outgoing["Host"] = parsed.netloc
+        path = parsed.path or "/"
+        if parsed.query:
+            path += "?" + parsed.query
+        raw = None
+        try:
+            raw = pool.urlopen(method, path, headers=outgoing, redirect=False,
+                               preload_content=False, decode_content=False)
+            if raw.status in (301, 302, 303, 307, 308):
+                location = raw.headers.get("Location")
+                if not location or hop == max_redirects:
+                    raise SSRFViolationError("Redirect limit exceeded or Location missing")
+                next_url = urljoin(current, location)
+                if urlparse(next_url).netloc != parsed.netloc:
+                    request_headers = {k: v for k, v in request_headers.items()
+                                       if k.lower() not in ("authorization", "cookie")}
+                current = next_url
+                continue
+            length = raw.headers.get("Content-Length", "")
+            if length.isdigit() and int(length) > max_bytes:
+                raise SSRFViolationError("Response exceeds maximum size")
+            if raw.headers.get("Content-Encoding", "identity").lower() not in ("identity", ""):
+                raise SSRFViolationError("Compressed responses are disabled")
+            data = bytearray()
+            if method != "HEAD":
+                while True:
+                    if time.monotonic() >= deadline:
+                        raise SSRFViolationError("Read deadline exceeded")
+                    chunk = raw.read(min(16384, max_bytes + 1 - len(data)), decode_content=False)
+                    if not chunk:
+                        break
+                    data.extend(chunk)
+                    if len(data) > max_bytes:
+                        raise SSRFViolationError("Response exceeds maximum size")
+            response = requests.Response()
+            response.status_code = raw.status
+            response.headers.update(raw.headers)
+            response.url = current
+            response._content = bytes(data)
+            response.encoding = requests.utils.get_encoding_from_headers(response.headers)
+            return response
+        finally:
+            if raw is not None:
+                raw.close()
+            pool.close()
+    raise SSRFViolationError("Redirect limit exceeded")
+
+
+def safe_get(url: str, headers=None, params=None, allowed_domains=(),
+             timeout_s=DEFAULT_TIMEOUT_S, max_bytes=DEFAULT_MAX_BYTES,
+             max_redirects=5, denied_domains=()) -> requests.Response:
+    return _safe_request("GET", url, headers, params, allowed_domains, timeout_s,
+                         max_bytes, max_redirects, denied_domains)
+
+
+def safe_head(url: str, headers=None, allowed_domains=(),
+              timeout_s=DEFAULT_TIMEOUT_S) -> requests.Response:
+    return _safe_request("HEAD", url, headers=headers, allowed_domains=allowed_domains,
+                         timeout_s=timeout_s)
 
 
 def assert_safe_method(method: str) -> None:

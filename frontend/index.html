@@ -425,8 +425,12 @@
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
       },
-      approve: async (id) => {
-        const res = await fetch(`/approvals/${id}/approve`, { method: 'POST' });
+      approve: async (id, expectedHash, sessionId) => {
+        const res = await fetch(`/approvals/${id}/approve`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ expected_hash: expectedHash, session_id: sessionId ?? null }),
+        });
+        if (!res.ok) throw new Error(`Approval refused: HTTP ${res.status}`);
         return res.json();
       },
       reject: async (id) => {
@@ -435,6 +439,7 @@
       },
       execute: async (id) => {
         const res = await fetch(`/approvals/${id}/execute`, { method: 'POST' });
+        if (!res.ok) throw new Error(`Execution refused: HTTP ${res.status}`);
         return res.json();
       },
       getEval: async () => {
@@ -1880,7 +1885,10 @@
 
       const act = async (action, id) => {
         try {
-          if (action === 'approve') await api.approve(id);
+          if (action === 'approve') {
+            const reviewed = approvals.find(a => a.id === id);
+            await api.approve(id, reviewed?.payload_hash, reviewed?.session_id);
+          }
           if (action === 'reject') await api.reject(id);
           if (action === 'execute') await api.execute(id);
           load();
@@ -1950,6 +1958,12 @@
                       ID: #{appr.id.slice(0, 10)}... • Created: {new Date(appr.created_at).toLocaleTimeString()}
                     </div>
 
+                    <div className="text-xs break-all">
+                      <p>Mode: {appr.execution_mode}</p>
+                      <p>Target: {appr.target}</p>
+                      <p>Hash: {appr.payload_hash}</p>
+                      <p>Expires: {appr.expires_at}</p>
+                    </div>
                     {/* Formatted Canonical Payload Box */}
                     <div className="bg-silver-50 rounded-xl p-3 border border-silver-200 font-mono text-[11px] text-silver-900 whitespace-pre-wrap max-h-36 overflow-y-auto">
                       {JSON.stringify(appr.payload, null, 2)}
@@ -1969,11 +1983,10 @@
                         <button
                           onClick={async () => {
                             try {
-                              await api.approve(appr.id);
-                              await api.execute(appr.id);
+                              await api.approve(appr.id, appr.payload_hash, appr.session_id);
+                              const outcome = await api.execute(appr.id);
                               await load();
-                              const recip = appr.payload?.to_email || appr.payload?.recipient || appr.payload?.to || '';
-                              alert('✅ Action Approved & Executed! ' + (recip ? 'Email successfully sent to ' + recip : 'Action dispatched.'));
+                              alert('Execution outcome: ' + outcome.status);
                             } catch (err) {
                               alert('Approval & execution failed: ' + err.message);
                               await load();
@@ -1990,7 +2003,7 @@
                       <button
                         onClick={async () => {
                           try {
-                            await api.execute(appr.id);
+                            const outcome = await api.execute(appr.id);
                             await load();
                             const recip = appr.payload?.to_email || appr.payload?.recipient || appr.payload?.to || '';
                             alert('✅ Dispatched & Sent! ' + (recip ? 'Email sent to ' + recip : ''));

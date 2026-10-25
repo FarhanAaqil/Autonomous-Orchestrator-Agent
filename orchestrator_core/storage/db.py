@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS approvals (
     payload_json TEXT NOT NULL,
     target TEXT,
     payload_hash TEXT,
-    status TEXT NOT NULL CHECK(status IN ('pending', 'approved', 'rejected', 'executing', 'executed', 'expired', 'superseded')),
+    status TEXT NOT NULL CHECK(status IN ('pending', 'approved', 'rejected', 'executing', 'executed', 'expired', 'superseded', 'simulated', 'submitted', 'confirmed', 'failed', 'outcome_unknown')),
     idempotency_key TEXT UNIQUE,
     approval_signature TEXT,
     approved_hash TEXT,
@@ -27,11 +27,26 @@ CREATE TABLE IF NOT EXISTS approvals (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     decided_at TIMESTAMP,
     expires_at TIMESTAMP,
-    executed_at TIMESTAMP
+    executed_at TIMESTAMP,
+    source_agent TEXT,
+    session_id TEXT,
+    version INTEGER NOT NULL DEFAULT 0,
+    execution_mode TEXT NOT NULL DEFAULT 'disabled'
 );
 CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status);
 CREATE INDEX IF NOT EXISTS idx_approvals_expires_at ON approvals(expires_at);
 CREATE INDEX IF NOT EXISTS idx_approvals_idempotency_key ON approvals(idempotency_key);
+
+CREATE TABLE IF NOT EXISTS execution_attempts (
+    id TEXT PRIMARY KEY,
+    approval_id TEXT NOT NULL UNIQUE REFERENCES approvals(id),
+    provider_key TEXT NOT NULL UNIQUE,
+    outcome TEXT NOT NULL CHECK(outcome IN ('simulated','submitted','confirmed','failed','outcome_unknown')),
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    receipt_json TEXT,
+    error_class TEXT
+);
 
 -- 2. Pipeline runs table
 CREATE TABLE IF NOT EXISTS pipeline_runs (
@@ -215,8 +230,35 @@ CREATE INDEX IF NOT EXISTS idx_schedules_next_run ON schedules(next_run_at);
 """
 
 
+def _migrate_approval_states(conn):
+    row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='approvals'").fetchone()
+    if not row or "outcome_unknown" in row[0]:
+        return
+    # SQLite cannot alter CHECK constraints. Copy within one transaction, preserving
+    # the original table name so dependent foreign keys keep their targets.
+    ddl = row[0].replace("CREATE TABLE approvals", "CREATE TABLE approvals_next", 1).replace('CREATE TABLE "approvals"', "CREATE TABLE approvals_next", 1)
+    ddl = ddl.replace("'superseded'", "'superseded', 'simulated', 'submitted', 'confirmed', 'failed', 'outcome_unknown'")
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys=OFF")
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(ddl)
+        conn.execute("INSERT INTO approvals_next SELECT * FROM approvals")
+        conn.execute("DROP TABLE approvals")
+        conn.execute("ALTER TABLE approvals_next RENAME TO approvals")
+        if conn.execute("PRAGMA foreign_key_check").fetchall():
+            raise RuntimeError("Approval migration would break foreign keys")
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys=ON")
+
+
 def run_migrations(conn: sqlite3.Connection) -> None:
     """Execute initial schema migrations creating all required tables and indexes."""
+    _migrate_approval_states(conn)
     with conn:
         # Check and migrate columns on existing approvals table if needed before creating indexes
         table_exists = conn.execute(
@@ -225,6 +267,13 @@ def run_migrations(conn: sqlite3.Connection) -> None:
         if table_exists:
             cur = conn.execute("PRAGMA table_info(approvals);")
             columns = [row[1] for row in cur.fetchall()]
+            if "execution_mode" not in columns:
+                conn.execute("ALTER TABLE approvals ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'disabled';")
+            if "version" not in columns:
+                conn.execute("ALTER TABLE approvals ADD COLUMN version INTEGER NOT NULL DEFAULT 0;")
+            for name in ("source_agent", "session_id"):
+                if name not in columns:
+                    conn.execute(f"ALTER TABLE approvals ADD COLUMN {name} TEXT;")
             if "target" not in columns:
                 conn.execute("ALTER TABLE approvals ADD COLUMN target TEXT;")
             if "payload_hash" not in columns:
@@ -279,14 +328,16 @@ def log_audit(
     audit_id = str(uuid.uuid4())
     detail_json = json.dumps(detail or {}, separators=(",", ":"), sort_keys=True)
     created_at = datetime.now(timezone.utc).isoformat()
-    with db:
-        db.execute(
-            """
-            INSERT INTO audit_log (id, actor, event, entity, entity_id, detail_json, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (audit_id, actor, event, entity, entity_id, detail_json, created_at),
-        )
+    owns_transaction = not db.in_transaction
+    db.execute(
+        """
+        INSERT INTO audit_log (id, actor, event, entity, entity_id, detail_json, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (audit_id, actor, event, entity, entity_id, detail_json, created_at),
+    )
+    if owns_transaction:
+        db.commit()
     return audit_id
 
 
