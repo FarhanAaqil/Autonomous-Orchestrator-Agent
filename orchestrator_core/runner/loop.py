@@ -23,6 +23,7 @@ from typing import Any, Callable, Optional
 
 from orchestrator_core.config import get_settings
 from orchestrator_core.core.approval_gate import request_approval
+from orchestrator_core.core.policy import require_execution, execution_scope
 from orchestrator_core.exceptions import (
     BudgetExceededError,
     JobError,
@@ -292,9 +293,13 @@ def run_job(
                         call_kwargs["db"] = db
 
                     if isinstance(tool_args, dict):
-                        raw_tool_result = tool_fn(**call_kwargs)
+                        require_execution(db, job.agent)
+                        with execution_scope(job.agent, job.session_id):
+                            raw_tool_result = tool_fn(**call_kwargs)
                     else:
-                        raw_tool_result = tool_fn(tool_args)
+                        require_execution(db, job.agent)
+                        with execution_scope(job.agent, job.session_id):
+                            raw_tool_result = tool_fn(tool_args)
                 except Exception as tool_exc:
                     logger.warning("Tool execution error in job %s: %s", job.id, tool_exc)
                     raw_tool_result = f"Error executing tool '{tool_name}': {tool_exc}"
@@ -342,6 +347,8 @@ def run_job(
                     payload=payload,
                     db=db,
                     target=target,
+                    source_agent=job.agent,
+                    session_id=job.session_id,
                 )
                 proposal_output = json.dumps({
                     "approval_id": approval_id,

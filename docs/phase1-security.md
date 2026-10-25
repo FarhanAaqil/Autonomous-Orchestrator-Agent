@@ -7,3 +7,12 @@ Production and staging require an AUTH_TOKEN of at least 32 characters and an in
 ACTION_EXECUTION_MODE defaults to disabled. Simulation must be explicitly selected. Live execution requires ENABLE_REAL_EMAIL=true and SMTP credentials; other provider adapters are unavailable and cannot be approved. Never enable live actions as part of automated tests.
 
 The health endpoint, UI bootstrap and generated API documentation are public. API data and administrative circuit controls require the owner credential. Browser session integration is completed in Phase 3; secured API clients must send the Authorization bearer header.
+# Runtime policy
+
+This deployment has one owner authenticated by its bearer token. Every execution
+entry point checks the global kill switch and agent enable flag. The kill switch
+stops new dispatches, jobs, pipeline steps, scheduled handlers, proposals and
+approved actions. It cannot recall a provider request already in flight.
+Read-only inspection and rejection remain available. Proposals carry their source
+agent and conversation so execution can recheck the originating agent's policy.
+

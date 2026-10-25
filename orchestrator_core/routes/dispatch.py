@@ -20,6 +20,8 @@ import json
 from pydantic import BaseModel
 
 from orchestrator_core.core.approval_gate import request_approval
+from orchestrator_core.core.policy import require_execution, run_handler
+from orchestrator_core.exceptions import AgentDisabledError, KillSwitchActiveError, SecurityPolicyViolationError
 from orchestrator_core.core.router import classify
 from orchestrator_core.models import (
     AgentResult,
@@ -61,6 +63,7 @@ def _get_agent_registry() -> dict:
 
 def _handle_operational_command(command: str, db: sqlite3.Connection, conversation_id: str) -> Optional[AgentResult]:
     lower = command.lower().strip()
+    require_execution(db)
 
     # 1. Pipelines
     if lower.startswith(("apply pipeline", "publish pipeline", "content pipeline", "research pipeline")):
@@ -408,6 +411,7 @@ async def dispatch_command(
     Classify and immediately execute a command within a persistent conversation thread.
     Injects past conversational context and saves the interaction to SQLite.
     """
+    require_execution(db)
     t_start = time.monotonic()
     logger.info("Dispatching command: %.80s", body.command)
     now = datetime.now(timezone.utc).isoformat()
@@ -527,7 +531,7 @@ async def dispatch_command(
         "conversation_id": cid,
         "conversation_history_text": history_text,
     }
-    result: AgentResult = handler(body.command, metadata=agent_meta)
+    result: AgentResult = run_handler(handler, body.command, db, agent_name, agent_meta, cid)
 
     # 6. Auto-queue approval if write action is triggered and not yet queued
     if result.action_type and not result.approval_id:
@@ -537,7 +541,7 @@ async def dispatch_command(
             "agent": agent_name,
         }
         try:
-            app_id = request_approval(action_type=result.action_type, payload=approval_payload, db=db)
+            app_id = request_approval(action_type=result.action_type, payload=approval_payload, db=db, source_agent=agent_name, session_id=cid)
             result.approval_id = app_id
             result.metadata["approval_id"] = app_id
         except Exception as exc:
@@ -579,6 +583,7 @@ async def dispatch_command_stream(body: DispatchRequest):
         now = datetime.now(timezone.utc).isoformat()
         db = get_db()
         try:
+            require_execution(db)
             # 1. Resolve or create conversation session
             cid = body.conversation_id
             if cid:
@@ -658,6 +663,7 @@ async def dispatch_command_stream(body: DispatchRequest):
             assert isinstance(classification, RouterResult)
             agent_name = classification.agent
             registry = _get_agent_registry()
+            require_execution(db, agent_name)
 
             if agent_name not in registry:
                 err_data = {"error": "AGENT_NOT_FOUND", "detail": f"Agent '{agent_name}' not found."}
@@ -685,7 +691,7 @@ async def dispatch_command_stream(body: DispatchRequest):
                     "conversation_id": cid,
                     "conversation_history_text": history_text,
                 }
-                result: AgentResult = handler(body.command, metadata=agent_meta)
+                result: AgentResult = run_handler(handler, body.command, db, agent_name, agent_meta, cid)
                 full_text = result.output
                 action_type = result.action_type
                 approval_id = result.approval_id
@@ -697,7 +703,7 @@ async def dispatch_command_stream(body: DispatchRequest):
                         "agent": agent_name,
                     }
                     try:
-                        app_id = request_approval(action_type=action_type, payload=approval_payload, db=db)
+                        app_id = request_approval(action_type=action_type, payload=approval_payload, db=db, source_agent=agent_name, session_id=cid)
                         approval_id = app_id
                     except Exception as exc:
                         logger.warning("Could not auto-queue approval record in stream: %s", exc)
@@ -717,6 +723,9 @@ async def dispatch_command_stream(body: DispatchRequest):
 
             # Final done event
             yield f"event: done\ndata: {json.dumps({'output': full_text, 'agent': agent_name, 'action_type': action_type, 'approval_id': approval_id, 'latency_ms': latency_ms, 'conversation_id': cid})}\n\n"
+        except (AgentDisabledError, KillSwitchActiveError, SecurityPolicyViolationError) as exc:
+            code = "AGENT_DISABLED" if isinstance(exc, AgentDisabledError) else "KILL_SWITCH_ACTIVE" if isinstance(exc, KillSwitchActiveError) else "SECURITY_POLICY_VIOLATION"
+            yield f"event: error\ndata: {json.dumps({'error': code, 'detail': str(exc)})}\n\n"
         finally:
             db.close()
 

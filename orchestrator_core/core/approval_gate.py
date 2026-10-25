@@ -36,6 +36,7 @@ from typing import Any, Optional
 
 from orchestrator_core.config import get_settings
 from orchestrator_core.core.action_catalog import normalize_action, require_adapter
+from orchestrator_core.core.policy import execution_origin, require_execution
 from orchestrator_core.exceptions import (
     ApprovalAlreadyExecutedError,
     ApprovalClaimConflictError,
@@ -181,6 +182,8 @@ def request_approval(
     expiry_hours: int = _DEFAULT_EXPIRY_HOURS,
     target: Optional[str] = None,
     idempotency_key: Optional[str] = None,
+    source_agent: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> str:
     """
     Queue an action for human review.
@@ -189,6 +192,10 @@ def request_approval(
     Stores canonical payload and bound payload_hash.
     """
     action_type, payload, target = normalize_action(action_type, payload, target)
+    origin_agent, origin_session = execution_origin.get()
+    source_agent = source_agent or origin_agent
+    session_id = session_id or origin_session
+    require_execution(db, source_agent, action_type)
 
     # SEC-04 Idempotent request resolution
     if idempotency_key is not None:
@@ -218,9 +225,9 @@ def request_approval(
             """
             INSERT INTO approvals (
                 id, action_type, payload_json, target, payload_hash,
-                status, idempotency_key, created_at, expires_at
+                status, idempotency_key, created_at, expires_at, source_agent, session_id
             )
-            VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
             """,
             (
                 approval_id,
@@ -231,6 +238,8 @@ def request_approval(
                 idempotency_key,
                 created_at.isoformat(),
                 expires_at.isoformat(),
+                source_agent,
+                session_id,
             ),
         )
 
@@ -475,7 +484,7 @@ def execute_approved(approval_id: str, db: sqlite3.Connection) -> None:
     row = db.execute(
         """
         SELECT id, action_type, payload_json, target, payload_hash, status,
-               idempotency_key, approval_signature, approved_hash, decided_at, expires_at
+               idempotency_key, approval_signature, approved_hash, decided_at, expires_at, source_agent
         FROM approvals
         WHERE id = ?
         """,
@@ -486,6 +495,7 @@ def execute_approved(approval_id: str, db: sqlite3.Connection) -> None:
         raise ApprovalNotFoundError(approval_id)
 
     status = row["status"]
+    require_execution(db, row["source_agent"] or "orchestrator", row["action_type"])
 
     if status == "executed":
         raise ApprovalAlreadyExecutedError(approval_id)

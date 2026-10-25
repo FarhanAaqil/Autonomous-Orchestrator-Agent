@@ -27,7 +27,9 @@ CREATE TABLE IF NOT EXISTS approvals (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     decided_at TIMESTAMP,
     expires_at TIMESTAMP,
-    executed_at TIMESTAMP
+    executed_at TIMESTAMP,
+    source_agent TEXT,
+    session_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status);
 CREATE INDEX IF NOT EXISTS idx_approvals_expires_at ON approvals(expires_at);
@@ -225,6 +227,9 @@ def run_migrations(conn: sqlite3.Connection) -> None:
         if table_exists:
             cur = conn.execute("PRAGMA table_info(approvals);")
             columns = [row[1] for row in cur.fetchall()]
+            for name in ("source_agent", "session_id"):
+                if name not in columns:
+                    conn.execute(f"ALTER TABLE approvals ADD COLUMN {name} TEXT;")
             if "target" not in columns:
                 conn.execute("ALTER TABLE approvals ADD COLUMN target TEXT;")
             if "payload_hash" not in columns:

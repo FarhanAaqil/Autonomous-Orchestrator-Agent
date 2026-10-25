@@ -53,6 +53,8 @@ class JobService:
     ) -> JobRecord:
         """Create and queue a new autonomous job."""
         canonical_agent = canonical_agent_name(agent)
+        from orchestrator_core.core.policy import require_execution
+        require_execution(db, canonical_agent)
         flag_rows = db.execute(
             "SELECT value FROM system_flags WHERE key IN (?, ?)",
             (f"agent_enabled_{canonical_agent}", f"agent_enabled_{agent}"),

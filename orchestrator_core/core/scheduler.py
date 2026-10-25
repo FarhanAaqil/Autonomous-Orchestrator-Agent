@@ -37,9 +37,15 @@ def _daily_briefing_job() -> None:
 
     logger.info("[scheduler] Running daily_briefing job — %s", datetime.now(timezone.utc).isoformat())
     try:
-        result = career_agent.handle(
-            "Give me a brief daily status summary of active career priorities and upcoming actions."
-        )
+        from orchestrator_core.storage.db import get_db
+        from orchestrator_core.core.policy import run_handler
+        db = get_db()
+        try:
+            result = run_handler(career_agent.handle,
+                "Give me a brief daily status summary of active career priorities and upcoming actions.",
+                db, "career_agent")
+        finally:
+            db.close()
         logger.info("[scheduler] daily_briefing result (first 200 chars): %.200s", result.output)
     except Exception:
         logger.exception("[scheduler] daily_briefing job failed")

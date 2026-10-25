@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from orchestrator_core.models import PipelineRequest
+from orchestrator_core.core.policy import require_execution, run_handler
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +74,7 @@ def _run_step(
     """Execute one agent step, record it, and return the result dict."""
     t0 = time.monotonic()
     try:
-        result = handler(command, metadata={"run_id": run_id, "step": step_number})
+        result = run_handler(handler, command, db, agent_name, {"run_id": run_id, "step": step_number})
         latency_ms = int((time.monotonic() - t0) * 1000)
         _write_step(db, run_id, step_number, agent_name, {"command": command},
                     {"output": result.output, "metadata": result.metadata},
@@ -98,6 +99,7 @@ def run_pipeline(
     Every agent step is recorded in pipeline_steps.
     """
     from orchestrator_core.agents import career_agent, research_agent, growth_content_agent
+    require_execution(db)
 
     run_id = str(uuid.uuid4())
     started_at = datetime.now(timezone.utc).isoformat()
