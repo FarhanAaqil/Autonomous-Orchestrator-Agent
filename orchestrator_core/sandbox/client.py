@@ -8,7 +8,6 @@ is set, or uses the local ephemeral Playwright/HTTP driver with identical safety
 
 from __future__ import annotations
 
-import base64
 import logging
 import os
 import re
@@ -72,32 +71,17 @@ class SandboxBrowserClient:
         )
         effective_max_bytes = max_bytes or self.limits.max_content_bytes
 
-        # 2. Dispatch via RPC if container is configured
+        # A configured remote boundary is authoritative: denial and outage propagate.
         if self.rpc_url:
-            try:
-                return self._browse_rpc(
-                    url=url,
-                    allowed_domains=allowed_domains,
-                    denied_domains=denied_domains,
-                    take_screenshot=take_screenshot,
-                    timeout_ms=effective_timeout_ms,
-                    max_bytes=effective_max_bytes,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Sandbox RPC request to %s failed (%s). Falling back to local driver.",
-                    self.rpc_url, exc,
-                )
-
-        # 3. Local driver execution
-        return self._browse_local(
-            url=url,
-            allowed_domains=allowed_domains,
-            denied_domains=denied_domains,
-            take_screenshot=take_screenshot,
-            timeout_ms=effective_timeout_ms,
-            max_bytes=effective_max_bytes,
-        )
+            return self._browse_rpc(
+                url, allowed_domains, denied_domains, take_screenshot,
+                effective_timeout_ms, effective_max_bytes,
+            )
+        from orchestrator_core.config import get_settings
+        if get_settings().environment != "development" or os.getenv("SANDBOX_ALLOW_LOCAL", "").lower() != "true":
+            raise SandboxSecurityError("Required browser sandbox is not configured")
+        return self._browse_local(url, allowed_domains, denied_domains, take_screenshot,
+                                  effective_timeout_ms, effective_max_bytes)
 
     def _browse_rpc(
         self,
@@ -121,6 +105,7 @@ class SandboxBrowserClient:
             f"{self.rpc_url}/browse",
             json=req_payload.model_dump(),
             timeout=(timeout_ms / 1000.0) + 5.0,
+            allow_redirects=False,
         )
         if resp.status_code == 403 or resp.status_code == 400:
             err_data = resp.json().get("detail", resp.text)
@@ -137,113 +122,12 @@ class SandboxBrowserClient:
         timeout_ms: int,
         max_bytes: int,
     ) -> BrowseResponse:
-        """Execute navigation using local Playwright driver or hardened HTTP fallback."""
-        try:
-            from playwright.sync_api import sync_playwright
-            return self._browse_with_playwright(
-                url=url,
-                allowed_domains=allowed_domains,
-                denied_domains=denied_domains,
-                take_screenshot=take_screenshot,
-                timeout_ms=timeout_ms,
-                max_bytes=max_bytes,
-            )
-        except Exception as exc:
-            logger.info("Local Playwright execution unavailable (%s); using secure HTTP fallback.", exc)
-            return self._browse_with_http_fallback(
-                url=url,
-                allowed_domains=allowed_domains,
-                timeout_ms=timeout_ms,
-                max_bytes=max_bytes,
-            )
-
-    def _browse_with_playwright(
-        self,
-        url: str,
-        allowed_domains: Sequence[str],
-        denied_domains: Sequence[str],
-        take_screenshot: bool,
-        timeout_ms: int,
-        max_bytes: int,
-    ) -> BrowseResponse:
-        """Run isolated navigation inside an ephemeral Playwright browser context."""
-        from playwright.sync_api import sync_playwright
-
-        with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=True,
-                args=[
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-gpu",
-                    "--incognito",
-                ],
-            )
-            # Create fresh ephemeral context - zero persistent cookies/storage
-            context = browser.new_context(
-                ignore_https_errors=False,
-                java_script_enabled=True,
-                user_agent="AaqilSandboxBrowser/1.0 (+https://github.com/FarhanAaqil/orchestrator_agent)",
-            )
-
-            page = context.new_page()
-            page.set_default_timeout(timeout_ms)
-
-            # Intercept and validate all subresource requests
-            def route_interceptor(route):
-                req_url = route.request.url
-                try:
-                    validate_sandbox_url(req_url, allowed_domains=allowed_domains, denied_domains=denied_domains)
-                    route.continue_()
-                except SandboxSecurityError:
-                    route.abort("accessdenied")
-
-            page.route("**/*", route_interceptor)
-
-            # Navigate to target
-            response = page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
-            final_url = page.url
-
-            # Re-verify final URL after any redirects
-            validate_sandbox_url(final_url, allowed_domains=allowed_domains, denied_domains=denied_domains)
-
-            title = page.title() or ""
-
-            # Extract human-readable text by removing scripts/styles/forms
-            text_content = page.evaluate("""() => {
-                const clone = document.body ? document.body.cloneNode(true) : document.documentElement.cloneNode(true);
-                const toRemove = clone.querySelectorAll('script, style, noscript, nav, header, footer, form, svg');
-                toRemove.forEach(el => el.remove());
-                return clone.innerText || '';
-            }""").strip()
-
-            # Optional screenshot
-            screenshot_b64 = None
-            if take_screenshot:
-                raw_bytes = page.screenshot(type="png", full_page=False)
-                screenshot_b64 = base64.b64encode(raw_bytes).decode("ascii")
-
-            # Cleanup immediately
-            context.close()
-            browser.close()
-
-            # Enforce content size limits
-            is_truncated = False
-            encoded_bytes = len(text_content.encode("utf-8"))
-            if encoded_bytes > max_bytes:
-                text_content = text_content[:max_bytes]
-                is_truncated = True
-
-            return BrowseResponse(
-                url=final_url,
-                title=title,
-                text_content=text_content,
-                screenshot_b64=screenshot_b64,
-                status_code=response.status if response else 200,
-                content_length=encoded_bytes,
-                is_truncated=is_truncated,
-            )
+        """Explicit development-only static reader; it never launches a local browser."""
+        if take_screenshot:
+            raise SandboxSecurityError("Screenshots require the isolated browser service")
+        return self._browse_with_http_fallback(
+            url, allowed_domains, timeout_ms, max_bytes, denied_domains,
+        )
 
     def _browse_with_http_fallback(
         self,
@@ -251,8 +135,9 @@ class SandboxBrowserClient:
         allowed_domains: Sequence[str],
         timeout_ms: int,
         max_bytes: int,
+        denied_domains: Sequence[str] = (),
     ) -> BrowseResponse:
-        """Fallback reader using hardened safe_get client."""
+        """Explicit local static reader using the pinned transport."""
         from orchestrator_core.tools.read.shared_client import safe_get
 
         resp = safe_get(
@@ -260,6 +145,8 @@ class SandboxBrowserClient:
             allowed_domains=tuple(allowed_domains),
             timeout_s=timeout_ms / 1000.0,
             max_bytes=max_bytes,
+            max_redirects=self.limits.max_redirects,
+            denied_domains=tuple(denied_domains),
         )
         html = resp.text
         # Clean HTML to text

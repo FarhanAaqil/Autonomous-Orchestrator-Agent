@@ -1,35 +1,46 @@
-version: '3.8'
-
 services:
   browser_sandbox:
     build:
-      context: .
-      dockerfile: Dockerfile
-    image: orchestrator/browser-sandbox:latest
-    container_name: orchestrator_browser_sandbox
+      context: ../..
+      dockerfile: docker/browser_sandbox/Dockerfile
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:8888:8888"
-    user: "1001:1001"
+    ports: ["127.0.0.1:8888:8888"]
     read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,size=512m
-    security_opt:
-      - no-new-privileges:true
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 1024M
-        reservations:
-          cpus: '0.25'
-          memory: 256M
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=512m"]
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN, SETUID, SETGID, SETPCAP]
+    security_opt: ["no-new-privileges:true"]
     environment:
-      - PORT=8888
-      - PYTHONUNBUFFERED=1
+      SANDBOX_ROLE: browser
+      PYTHONUNBUFFERED: "1"
+    depends_on: [read_gateway]
     networks:
-      - sandbox_net
-
+      isolated:
+        ipv4_address: 172.30.90.3
+    mem_limit: 1g
+    cpus: 1
+  read_gateway:
+    build:
+      context: ../..
+      dockerfile: docker/browser_sandbox/Dockerfile.egress
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=64m"]
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN, SETUID, SETGID, SETPCAP]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      SANDBOX_ROLE: gateway
+    networks:
+      isolated:
+        ipv4_address: 172.30.90.2
+      outbound: {}
+    mem_limit: 256m
+    cpus: 0.5
 networks:
-  sandbox_net:
-    driver: bridge
+  isolated:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.90.0/24
+  outbound: {}

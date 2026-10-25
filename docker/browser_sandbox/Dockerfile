@@ -7,23 +7,28 @@
 
 FROM mcr.microsoft.com/playwright/python:v1.40.0-jammy
 
-# Create non-root user
-RUN useradd -u 1001 -m -s /bin/bash pwuser && \
+# The firewall initializer drops to this fixed, unprivileged numeric identity.
+RUN (getent group 1001 || groupadd -g 1001 sandbox_runtime) && \
+    (getent passwd 1001 || useradd -u 1001 -g 1001 -m sandbox_runtime) && \
     mkdir -p /app /tmp/playwright_cache /tmp/ephemeral_profile && \
-    chown -R pwuser:pwuser /app /tmp/playwright_cache /tmp/ephemeral_profile
+    chown -R 1001:1001 /app /tmp/playwright_cache /tmp/ephemeral_profile
 
 WORKDIR /app
 
 # Install minimal server dependencies
-COPY requirements.txt /app/requirements.txt
+COPY docker/browser_sandbox/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
 # Copy server code
-COPY server.py security.py /app/
-RUN chown -R pwuser:pwuser /app
+COPY docker/browser_sandbox/server.py docker/browser_sandbox/gateway.py /app/
+COPY docker/browser_sandbox/entrypoint.sh /app/entrypoint.sh
+RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod 755 /app/entrypoint.sh
+RUN apt-get update && apt-get install -y --no-install-recommends iptables util-linux && rm -rf /var/lib/apt/lists/*
+RUN chown -R 1001:1001 /app
 
-# Switch to non-root user
-USER pwuser
+# Firewall setup runs as root; entrypoint drops all privileges before serving
+USER root
+ENTRYPOINT ["/app/entrypoint.sh"]
 
 ENV PORT=8888 \
     PYTHONUNBUFFERED=1 \

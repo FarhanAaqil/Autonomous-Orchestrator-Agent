@@ -14,7 +14,7 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from security import SandboxSecurityError, validate_sandbox_url
+from gateway import ReadBoundary
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sandbox_server")
@@ -28,7 +28,7 @@ class BrowseRequest(BaseModel):
     denied_domains: list[str] = Field(default_factory=list)
     timeout_ms: int = Field(default=15000, ge=1000, le=30000)
     take_screenshot: bool = False
-    max_bytes: int = 1048576
+    max_bytes: int = Field(default=1048576, ge=1, le=1048576)
 
 
 class BrowseResponse(BaseModel):
@@ -49,16 +49,6 @@ def health():
 
 @app.post("/browse", response_model=BrowseResponse)
 def browse(req: BrowseRequest):
-    # Pre-flight security validation
-    try:
-        validate_sandbox_url(
-            req.url,
-            allowed_domains=req.allowed_domains,
-            denied_domains=req.denied_domains,
-        )
-    except SandboxSecurityError as sec_err:
-        raise HTTPException(status_code=403, detail=str(sec_err))
-
     try:
         from playwright.sync_api import sync_playwright
 
@@ -76,35 +66,22 @@ def browse(req: BrowseRequest):
             # Ephemeral context - zero saved cookies or state
             context = browser.new_context(
                 ignore_https_errors=False,
-                java_script_enabled=True,
+                java_script_enabled=False,
+                service_workers="block",
+                accept_downloads=False,
                 user_agent="AaqilSandboxBrowser/1.0 (+https://github.com/FarhanAaqil/orchestrator_agent)",
             )
             page = context.new_page()
             page.set_default_timeout(req.timeout_ms)
 
-            # Subresource SSRF validation
-            def route_handler(route):
-                try:
-                    validate_sandbox_url(
-                        route.request.url,
-                        allowed_domains=req.allowed_domains,
-                        denied_domains=req.denied_domains,
-                    )
-                    route.continue_()
-                except SandboxSecurityError:
-                    route.abort("accessdenied")
-
-            page.route("**/*", route_handler)
+            boundary = ReadBoundary(req)
+            context.route("**/*", boundary.handle)
+            logger.info("Page scripts, service workers, forms and native egress disabled")
 
             response = page.goto(req.url, wait_until="domcontentloaded", timeout=req.timeout_ms)
-            final_url = page.url
-
-            # Validate final redirect destination
-            validate_sandbox_url(
-                final_url,
-                allowed_domains=req.allowed_domains,
-                denied_domains=req.denied_domains,
-            )
+            if boundary.error:
+                raise HTTPException(403, detail=boundary.error)
+            final_url = boundary.final_url
 
             title = page.title() or ""
 
@@ -139,8 +116,8 @@ def browse(req: BrowseRequest):
                 content_length=encoded_bytes,
                 is_truncated=is_truncated,
             )
-    except SandboxSecurityError as sec_err:
-        raise HTTPException(status_code=403, detail=str(sec_err))
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception("Error executing browse request for %s: %s", req.url, exc)
         raise HTTPException(status_code=500, detail=str(exc))
