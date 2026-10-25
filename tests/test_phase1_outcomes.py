@@ -67,5 +67,7 @@ def test_local_commit_failure_preserves_uncertain_attempt(db):
 
 
 def test_missing_model_key_cannot_invent_completed_work():
-    with pytest.raises(RuntimeError, match="credentials"):
-        _default_llm_call([{"role": "user", "content": "Do the task"}])
+    settings = SimpleNamespace(groq_api_key=None)
+    with patch("orchestrator_core.runner.loop.get_settings", return_value=settings):
+        with pytest.raises(RuntimeError, match="credentials"):
+            _default_llm_call([{"role": "user", "content": "Do the task"}])
