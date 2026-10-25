@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS approvals (
     expires_at TIMESTAMP,
     executed_at TIMESTAMP,
     source_agent TEXT,
-    session_id TEXT
+    session_id TEXT,
+    version INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status);
 CREATE INDEX IF NOT EXISTS idx_approvals_expires_at ON approvals(expires_at);
@@ -227,6 +228,8 @@ def run_migrations(conn: sqlite3.Connection) -> None:
         if table_exists:
             cur = conn.execute("PRAGMA table_info(approvals);")
             columns = [row[1] for row in cur.fetchall()]
+            if "version" not in columns:
+                conn.execute("ALTER TABLE approvals ADD COLUMN version INTEGER NOT NULL DEFAULT 0;")
             for name in ("source_agent", "session_id"):
                 if name not in columns:
                     conn.execute(f"ALTER TABLE approvals ADD COLUMN {name} TEXT;")
@@ -284,14 +287,16 @@ def log_audit(
     audit_id = str(uuid.uuid4())
     detail_json = json.dumps(detail or {}, separators=(",", ":"), sort_keys=True)
     created_at = datetime.now(timezone.utc).isoformat()
-    with db:
-        db.execute(
-            """
-            INSERT INTO audit_log (id, actor, event, entity, entity_id, detail_json, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (audit_id, actor, event, entity, entity_id, detail_json, created_at),
-        )
+    owns_transaction = not db.in_transaction
+    db.execute(
+        """
+        INSERT INTO audit_log (id, actor, event, entity, entity_id, detail_json, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (audit_id, actor, event, entity, entity_id, detail_json, created_at),
+    )
+    if owns_transaction:
+        db.commit()
     return audit_id
 
 

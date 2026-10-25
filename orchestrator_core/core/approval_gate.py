@@ -31,6 +31,8 @@ import json
 import logging
 import sqlite3
 import uuid
+import inspect
+from functools import wraps
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -177,6 +179,25 @@ def evaluate_target_policy(
 
 # ── Request ────────────────────────────────────────────────────────────────────
 
+def atomic_decision(fn):
+    """Serialize decision reads and writes; audit inserts join this transaction."""
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        db = inspect.signature(fn).bind(*args, **kwargs).arguments["db"]
+        if db.in_transaction:
+            raise RuntimeError("Approval decisions require a clean transaction boundary.")
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            result = fn(*args, **kwargs)
+            db.commit()
+            return result
+        except BaseException:
+            db.rollback()
+            raise
+    return wrapped
+
+
+@atomic_decision
 def request_approval(
     action_type: str,
     payload: dict[str, Any],
@@ -202,11 +223,13 @@ def request_approval(
     # SEC-04 Idempotent request resolution
     if idempotency_key is not None:
         existing = db.execute(
-            "SELECT id, status FROM approvals WHERE idempotency_key = ?",
+            "SELECT * FROM approvals WHERE idempotency_key = ?",
             (idempotency_key,),
         ).fetchone()
         if existing:
-            if existing["status"] == "executed":
+            if (existing["status"] not in ("pending", "approved")
+                    or existing["payload_hash"] != compute_payload_hash(action_type, payload, target)
+                    or existing["source_agent"] != source_agent or existing["session_id"] != session_id):
                 raise IdempotencyConflictError(idempotency_key)
             return existing["id"]
 
@@ -222,28 +245,27 @@ def request_approval(
     created_at = datetime.now(timezone.utc)
     expires_at = created_at + timedelta(hours=expiry_hours)
 
-    with db:
-        db.execute(
-            """
-            INSERT INTO approvals (
-                id, action_type, payload_json, target, payload_hash,
-                status, idempotency_key, created_at, expires_at, source_agent, session_id
-            )
-            VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
-            """,
-            (
-                approval_id,
-                action_type,
-                payload_json,
-                target,
-                payload_hash,
-                idempotency_key,
-                created_at.isoformat(),
-                expires_at.isoformat(),
-                source_agent,
-                session_id,
-            ),
+    db.execute(
+        """
+        INSERT INTO approvals (
+            id, action_type, payload_json, target, payload_hash,
+            status, idempotency_key, created_at, expires_at, source_agent, session_id
         )
+        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
+        """,
+        (
+            approval_id,
+            action_type,
+            payload_json,
+            target,
+            payload_hash,
+            idempotency_key,
+            created_at.isoformat(),
+            expires_at.isoformat(),
+            source_agent,
+            session_id,
+        ),
+    )
 
     log_audit(
         db,
@@ -273,6 +295,7 @@ def _consent_context(row) -> str:
     return json.dumps([row["source_agent"], row["session_id"], row["expires_at"]], separators=(",", ":"))
 
 
+@atomic_decision
 def approve(
     approval_id: str,
     db: sqlite3.Connection,
@@ -326,18 +349,17 @@ def approve(
     approved_hash = stored_hash
     signature = generate_approval_signature(approval_id, approved_hash, decided_at, context=_consent_context(row))
 
-    with db:
-        db.execute(
-            """
-            UPDATE approvals
-            SET status = 'approved',
-                decided_at = ?,
-                approved_hash = ?,
-                approval_signature = ?
-            WHERE id = ? AND status = 'pending'
-            """,
-            (decided_at, approved_hash, signature, approval_id),
-        )
+    db.execute(
+        """
+        UPDATE approvals
+        SET status = 'approved', version = version + 1,
+            decided_at = ?,
+            approved_hash = ?,
+            approval_signature = ?
+        WHERE id = ? AND status = 'pending'
+        """,
+        (decided_at, approved_hash, signature, approval_id),
+    )
 
     log_audit(
         db,
@@ -350,6 +372,7 @@ def approve(
     logger.info("Approval approved — id=%s hash=%s", approval_id, approved_hash)
 
 
+@atomic_decision
 def reject(approval_id: str, db: sqlite3.Connection, reason: Optional[str] = None) -> None:
     """Transition a pending approval to 'rejected' state."""
     row = db.execute(
@@ -364,11 +387,10 @@ def reject(approval_id: str, db: sqlite3.Connection, reason: Optional[str] = Non
         raise ApprovalNotGrantedError(approval_id, row["status"])
 
     decided_at = datetime.now(timezone.utc).isoformat()
-    with db:
-        db.execute(
-            "UPDATE approvals SET status = 'rejected', decided_at = ? WHERE id = ? AND status = 'pending'",
-            (decided_at, approval_id),
-        )
+    db.execute(
+        "UPDATE approvals SET status = 'rejected', version = version + 1, decided_at = ? WHERE id = ? AND status = 'pending'",
+        (decided_at, approval_id),
+    )
 
     log_audit(
         db,
@@ -383,6 +405,7 @@ def reject(approval_id: str, db: sqlite3.Connection, reason: Optional[str] = Non
 
 # ── Edit and Supersede (SEC-06) ────────────────────────────────────────────────
 
+@atomic_decision
 def edit_and_supersede(
     approval_id: str,
     new_payload: dict[str, Any],
@@ -423,35 +446,34 @@ def edit_and_supersede(
     created_at = datetime.now(timezone.utc)
     expires_at = created_at + timedelta(hours=expiry_hours)
 
-    with db:
-        # 1. Supersede old approval
-        db.execute(
-            "UPDATE approvals SET status = 'superseded' WHERE id = ?",
-            (approval_id,),
+    # 1. Supersede old approval
+    db.execute(
+        "UPDATE approvals SET status = 'superseded', version = version + 1 WHERE id = ? AND status IN ('pending', 'approved')",
+        (approval_id,),
+    )
+    # 2. Insert new pending approval
+    db.execute(
+        """
+        INSERT INTO approvals (
+            id, action_type, payload_json, target, payload_hash,
+            status, idempotency_key, supersedes_id, created_at, expires_at, source_agent, session_id
         )
-        # 2. Insert new pending approval
-        db.execute(
-            """
-            INSERT INTO approvals (
-                id, action_type, payload_json, target, payload_hash,
-                status, idempotency_key, supersedes_id, created_at, expires_at, source_agent, session_id
-            )
-            VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                new_id,
-                action_type,
-                new_payload_json,
-                target,
-                new_payload_hash,
-                new_idempotency_key,
-                approval_id,
-                created_at.isoformat(),
-                expires_at.isoformat(),
-                row["source_agent"],
-                row["session_id"],
-            ),
-        )
+        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            new_id,
+            action_type,
+            new_payload_json,
+            target,
+            new_payload_hash,
+            new_idempotency_key,
+            approval_id,
+            created_at.isoformat(),
+            expires_at.isoformat(),
+            row["source_agent"],
+            row["session_id"],
+        ),
+    )
 
     log_audit(
         db,
@@ -482,6 +504,19 @@ def edit_and_supersede(
 
 # ── Execute ────────────────────────────────────────────────────────────────────
 
+def _transition(db, row, status, event, **fields):
+    fields.update(status=status, version=row["version"] + 1)
+    assignments = ", ".join(f"{key}=?" for key in fields)
+    with db:
+        changed = db.execute(
+            f"UPDATE approvals SET {assignments} WHERE id=? AND status=? AND version=?",
+            (*fields.values(), row["id"], row["status"], row["version"]),
+        )
+        if changed.rowcount != 1:
+            raise ApprovalClaimConflictError(row["id"])
+        log_audit(db, actor="executor", event=event, entity_id=row["id"], detail={"status": status})
+
+
 def execute_approved(approval_id: str, db: sqlite3.Connection) -> None:
     """
     Execute the stored action for an approved record.
@@ -498,7 +533,7 @@ def execute_approved(approval_id: str, db: sqlite3.Connection) -> None:
     row = db.execute(
         """
         SELECT id, action_type, payload_json, target, payload_hash, status,
-               idempotency_key, approval_signature, approved_hash, decided_at, expires_at, source_agent, session_id
+               idempotency_key, approval_signature, approved_hash, decided_at, expires_at, source_agent, session_id, version
         FROM approvals
         WHERE id = ?
         """,
@@ -544,17 +579,7 @@ def execute_approved(approval_id: str, db: sqlite3.Connection) -> None:
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=timezone.utc)
         if datetime.now(timezone.utc) > expires_at:
-            with db:
-                db.execute(
-                    "UPDATE approvals SET status = 'expired' WHERE id = ?", (approval_id,)
-                )
-            log_audit(
-                db,
-                actor="executor",
-                event="approval_expired_rejected",
-                entity="approval",
-                entity_id=approval_id,
-            )
+            _transition(db, row, "expired", "approval_expired_rejected")
             raise ApprovalExpiredError(approval_id)
 
     # SEC-02: Cryptographic payload hash integrity check
@@ -587,26 +612,7 @@ def execute_approved(approval_id: str, db: sqlite3.Connection) -> None:
         )
         raise ApprovalSignatureInvalidError(approval_id)
 
-    # Atomic compare-and-set: transition approved → executing
-    with db:
-        cursor = db.execute(
-            "UPDATE approvals SET status = 'executing' WHERE id = ? AND status = 'approved'",
-            (approval_id,),
-        )
-
-    if cursor.rowcount == 0:
-        # Another concurrent call won the race
-        raise ApprovalClaimConflictError(approval_id)
-
-    log_audit(
-        db,
-        actor="executor",
-        event="execution_attempted",
-        entity="approval",
-        entity_id=approval_id,
-        detail={"action_type": row["action_type"], "idempotency_key": idempotency_key},
-    )
-    logger.info("Execution claimed — id=%s action_type=%s", approval_id, row["action_type"])
+    _transition(db, row, "executing", "execution_attempted")
 
     try:
         payload = json.loads(row["payload_json"])
@@ -627,23 +633,10 @@ def execute_approved(approval_id: str, db: sqlite3.Connection) -> None:
         logger.exception("Dispatch failed for approval id=%s — row left in 'executing'", approval_id)
         raise
 
-    # Transition executing → executed
-    executed_at = datetime.now(timezone.utc).isoformat()
-    with db:
-        db.execute(
-            "UPDATE approvals SET status = 'executed', executed_at = ? WHERE id = ?",
-            (executed_at, approval_id),
-        )
-
-    log_audit(
-        db,
-        actor="executor",
-        event="execution_succeeded",
-        entity="approval",
-        entity_id=approval_id,
-        detail={"executed_at": executed_at, "idempotency_key": idempotency_key},
-    )
-    logger.info("Execution complete — id=%s executed_at=%s", approval_id, executed_at)
+    current = dict(row)
+    current.update(status="executing", version=row["version"] + 1)
+    _transition(db, current, "executed", "execution_succeeded",
+                executed_at=datetime.now(timezone.utc).isoformat())
 
 
 # ── Dispatch action (SDK_EXECUTOR) ─────────────────────────────────────────────
