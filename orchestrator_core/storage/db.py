@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS approvals (
     executed_at TIMESTAMP,
     source_agent TEXT,
     session_id TEXT,
-    version INTEGER NOT NULL DEFAULT 0
+    version INTEGER NOT NULL DEFAULT 0,
+    execution_mode TEXT NOT NULL DEFAULT 'disabled'
 );
 CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status);
 CREATE INDEX IF NOT EXISTS idx_approvals_expires_at ON approvals(expires_at);
@@ -266,6 +267,8 @@ def run_migrations(conn: sqlite3.Connection) -> None:
         if table_exists:
             cur = conn.execute("PRAGMA table_info(approvals);")
             columns = [row[1] for row in cur.fetchall()]
+            if "execution_mode" not in columns:
+                conn.execute("ALTER TABLE approvals ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'disabled';")
             if "version" not in columns:
                 conn.execute("ALTER TABLE approvals ADD COLUMN version INTEGER NOT NULL DEFAULT 0;")
             for name in ("source_agent", "session_id"):

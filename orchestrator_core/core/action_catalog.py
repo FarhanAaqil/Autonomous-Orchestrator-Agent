@@ -105,5 +105,8 @@ def require_adapter(action_type):
 
 
 def action_schemas():
+    from orchestrator_core.config import get_settings
+    mode = get_settings().action_execution_mode
     return {name: {"payload": spec.schema.model_json_schema(), "adapter": spec.adapter,
+                   "execution_mode": mode if spec.adapter != "unavailable" else "unavailable",
                    "agents": sorted(spec.agents)} for name, spec in ACTION_CATALOG.items()}

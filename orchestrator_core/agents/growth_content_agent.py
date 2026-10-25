@@ -94,9 +94,15 @@ def handle(command: str, metadata: Optional[dict[str, Any]] = None) -> AgentResu
         action_type = "publish_devto"
         logger.info("Publish intent detected — queuing for approval gate")
 
+    meta = dict(metadata or {})
+    if action_type:
+        meta["approval_payload"] = {
+            "title": output.splitlines()[0].lstrip("# ").strip() if output.strip() else "Untitled draft",
+            "content": output,
+        }
     return AgentResult(
         agent="growth_content_agent",
         output=output,
         action_type=action_type,
-        metadata=metadata or {},
+        metadata=meta,
     )

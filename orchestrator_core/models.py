@@ -78,6 +78,7 @@ class ApprovalRecord(BaseModel):
     decided_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
     executed_at: Optional[datetime] = None
+    execution_mode: Literal["disabled", "simulation", "live"] = "disabled"
     source_agent: Optional[str] = None
     session_id: Optional[str] = None
 

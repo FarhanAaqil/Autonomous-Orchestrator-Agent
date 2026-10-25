@@ -421,21 +421,7 @@ async def dispatch_command(
             ).model_dump(),
         )
 
-    # 4b. Verify agent is not administratively disabled
-    canonical = canonical_agent_name(agent_name)
-    flag_rows = db.execute(
-        "SELECT value FROM system_flags WHERE key IN (?, ?)",
-        (f"agent_enabled_{canonical}", f"agent_enabled_{agent_name}"),
-    ).fetchall()
-    for r in flag_rows:
-        if r["value"].strip() == "0":
-            return JSONResponse(
-                status_code=403,
-                content=ErrorResponse(
-                    error="AGENT_DISABLED",
-                    detail=f"Agent '{agent_name}' is administratively disabled.",
-                ).model_dump(),
-            )
+    require_execution(db, agent_name)
 
     # 5. Execute agent with context injection
     handler = registry[agent_name]
@@ -458,7 +444,7 @@ async def dispatch_command(
             result.approval_id = app_id
             result.metadata["approval_id"] = app_id
         except Exception as exc:
-            logger.warning("Could not auto-queue approval record: %s", exc)
+            raise SecurityPolicyViolationError(f"Proposal was not queued: {exc}") from exc
 
     latency_ms = int((time.monotonic() - t_start) * 1000)
     logger.info(
@@ -619,7 +605,7 @@ async def dispatch_command_stream(body: DispatchRequest):
                         app_id = request_approval(action_type=action_type, payload=approval_payload, db=db, source_agent=agent_name, session_id=cid)
                         approval_id = app_id
                     except Exception as exc:
-                        logger.warning("Could not auto-queue approval record in stream: %s", exc)
+                        raise SecurityPolicyViolationError(f"Proposal was not queued: {exc}") from exc
                 # Yield entire output as token chunk
                 yield f"event: token\ndata: {json.dumps({'token': full_text})}\n\n"
 

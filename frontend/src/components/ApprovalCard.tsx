@@ -68,6 +68,7 @@ export const ApprovalCard: React.FC<ApprovalCardProps> = ({
       </div>
 
       <div className="text-xs break-all">
+        <p>Mode: {approval.execution_mode}</p>
         <p>Target: {approval.target}</p>
         <p>Hash: {approval.payload_hash}</p>
         <p>Expires: {approval.expires_at}</p>

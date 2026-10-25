@@ -30,6 +30,7 @@ export interface ApprovalRecord {
   expires_at?: string | null;
   executed_at?: string | null;
   target?: string | null;
+  execution_mode?: "disabled" | "simulation" | "live";
   payload_hash?: string | null;
   session_id?: string | null;
 }

@@ -106,7 +106,7 @@ def handle(command: str, metadata: Optional[dict[str, Any]] = None) -> AgentResu
         action_type = "linkedin_post"
         prompt = f"Draft an engaging, technical LinkedIn post ready for publishing based on: {command}"
         post_draft = _call_llm(prompt)
-        payload = {"post_content": post_draft, "command": command}
+        payload = {"content": post_draft}
         meta["approval_payload"] = payload
         meta["action_type"] = action_type
         return AgentResult(

@@ -74,6 +74,7 @@ def compute_payload_hash(
     action_type: str,
     payload: dict[str, Any] | str,
     target: Optional[str] = None,
+    execution_mode: Optional[str] = None,
 ) -> str:
     """
     Compute deterministic SHA-256 hash across action_type, target, and canonical payload JSON.
@@ -85,7 +86,7 @@ def compute_payload_hash(
         payload_dict = payload
     canonical_json = json.dumps(payload_dict, separators=(",", ":"), sort_keys=True)
     target_str = target or ""
-    canonical_input = f"{action_type}:{target_str}:{canonical_json}"
+    canonical_input = f"{action_type}:{target_str}:{canonical_json}:{execution_mode or ''}"
     return hashlib.sha256(canonical_input.encode("utf-8")).hexdigest()
 
 
@@ -228,7 +229,7 @@ def request_approval(
         ).fetchone()
         if existing:
             if (existing["status"] not in ("pending", "approved")
-                    or existing["payload_hash"] != compute_payload_hash(action_type, payload, target)
+                    or existing["payload_hash"] != compute_payload_hash(action_type, payload, target, get_settings().action_execution_mode)
                     or existing["source_agent"] != source_agent or existing["session_id"] != session_id):
                 raise IdempotencyConflictError(idempotency_key)
             return existing["id"]
@@ -240,7 +241,7 @@ def request_approval(
 
     approval_id = str(uuid.uuid4())
     payload_json = json.dumps(payload, separators=(",", ":"), sort_keys=True)
-    payload_hash = compute_payload_hash(action_type, payload, target)
+    payload_hash = compute_payload_hash(action_type, payload, target, get_settings().action_execution_mode)
     idempotency_key = idempotency_key or f"idem_{approval_id}"
     created_at = datetime.now(timezone.utc)
     expires_at = created_at + timedelta(hours=expiry_hours)
@@ -249,9 +250,9 @@ def request_approval(
         """
         INSERT INTO approvals (
             id, action_type, payload_json, target, payload_hash,
-            status, idempotency_key, created_at, expires_at, source_agent, session_id
+            status, idempotency_key, created_at, expires_at, source_agent, session_id, execution_mode
         )
-        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
         """,
         (
             approval_id,
@@ -264,6 +265,7 @@ def request_approval(
             expires_at.isoformat(),
             source_agent,
             session_id,
+            get_settings().action_execution_mode,
         ),
     )
 
@@ -292,7 +294,7 @@ def request_approval(
 # ── State transitions ──────────────────────────────────────────────────────────
 
 def _consent_context(row) -> str:
-    return json.dumps([row["source_agent"], row["session_id"], row["expires_at"]], separators=(",", ":"))
+    return json.dumps([row["source_agent"], row["session_id"], row["expires_at"], row["execution_mode"]], separators=(",", ":"))
 
 
 @atomic_decision
@@ -331,7 +333,7 @@ def approve(
         raise ApprovalExpiredError(approval_id)
 
     # SEC-02 Integrity check: recalculate hash from raw DB content
-    recomputed_hash = compute_payload_hash(row["action_type"], row["payload_json"], row["target"])
+    recomputed_hash = compute_payload_hash(row["action_type"], row["payload_json"], row["target"], row["execution_mode"])
     if recomputed_hash != stored_hash:
         log_audit(
             db,
@@ -441,7 +443,7 @@ def edit_and_supersede(
 
     new_id = str(uuid.uuid4())
     new_payload_json = json.dumps(new_payload, separators=(",", ":"), sort_keys=True)
-    new_payload_hash = compute_payload_hash(action_type, new_payload, target)
+    new_payload_hash = compute_payload_hash(action_type, new_payload, target, get_settings().action_execution_mode)
     new_idempotency_key = f"idem_{new_id}"
     created_at = datetime.now(timezone.utc)
     expires_at = created_at + timedelta(hours=expiry_hours)
@@ -456,9 +458,9 @@ def edit_and_supersede(
         """
         INSERT INTO approvals (
             id, action_type, payload_json, target, payload_hash,
-            status, idempotency_key, supersedes_id, created_at, expires_at, source_agent, session_id
+            status, idempotency_key, supersedes_id, created_at, expires_at, source_agent, session_id, execution_mode
         )
-        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             new_id,
@@ -472,6 +474,7 @@ def edit_and_supersede(
             expires_at.isoformat(),
             row["source_agent"],
             row["session_id"],
+            get_settings().action_execution_mode,
         ),
     )
 
@@ -533,7 +536,7 @@ def execute_approved(approval_id: str, db: sqlite3.Connection) -> dict:
     row = db.execute(
         """
         SELECT id, action_type, payload_json, target, payload_hash, status,
-               idempotency_key, approval_signature, approved_hash, decided_at, expires_at, source_agent, session_id, version
+               idempotency_key, approval_signature, approved_hash, decided_at, expires_at, source_agent, session_id, version, execution_mode
         FROM approvals
         WHERE id = ?
         """,
@@ -583,7 +586,7 @@ def execute_approved(approval_id: str, db: sqlite3.Connection) -> dict:
             raise ApprovalExpiredError(approval_id)
 
     # SEC-02: Cryptographic payload hash integrity check
-    recomputed_hash = compute_payload_hash(row["action_type"], row["payload_json"], row["target"])
+    recomputed_hash = compute_payload_hash(row["action_type"], row["payload_json"], row["target"], row["execution_mode"])
     stored_hash = row["payload_hash"]
     approved_hash = row["approved_hash"]
 
@@ -612,9 +615,18 @@ def execute_approved(approval_id: str, db: sqlite3.Connection) -> dict:
         )
         raise ApprovalSignatureInvalidError(approval_id)
 
+    if row["execution_mode"] != get_settings().action_execution_mode:
+        raise SecurityPolicyViolationError("Execution mode changed; edit and review a new proposal.")
     attempt_id = str(uuid.uuid4())
     started_at = datetime.now(timezone.utc).isoformat()
+    db.execute("BEGIN IMMEDIATE")
     with db:
+        require_execution(db, row["source_agent"] or "orchestrator", row["action_type"])
+        target_policy = evaluate_target_policy(row["action_type"], row["target"], db)
+        if not target_policy["allowed"]:
+            raise SecurityPolicyViolationError(target_policy["reason"])
+        if datetime.fromisoformat(row["expires_at"]) <= datetime.now(timezone.utc):
+            raise ApprovalExpiredError(approval_id)
         changed = db.execute(
             "UPDATE approvals SET status='executing', version=version+1 WHERE id=? AND status='approved' AND version=?",
             (approval_id, row["version"]),
