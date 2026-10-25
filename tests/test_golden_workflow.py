@@ -86,7 +86,7 @@ def test_golden_workflow_end_to_end(clean_db: sqlite3.Connection):
                     "title": "Fault Tolerance in Agentic AI",
                     "content": "Comprehensive analysis of state machines...",
                 },
-                "target": "devto",
+                "target": "publish_devto",
             },
         }),
     ]
@@ -113,45 +113,10 @@ def test_golden_workflow_end_to_end(clean_db: sqlite3.Connection):
     )
 
     assert paused_job.status == "awaiting_approval"
-    steps = JobService.get_steps(job.id, clean_db)
-    # Step 0: LLM thought 1
-    # Step 1: Tool execution
-    # Step 2: LLM thought 2
-    # Step 3: Propose approval
-    assert len(steps) >= 4
-    propose_step = next(s for s in steps if s.kind == "propose")
-    prop_data = json.loads(propose_step.output_json)
-    approval_id = prop_data["approval_id"]
-
-    # Phase B: Human review and approval execution via approval gate
-    approve(approval_id, clean_db)
-    row_appr = clean_db.execute("SELECT status FROM approvals WHERE id = ?", (approval_id,)).fetchone()
-    assert row_appr["status"] == "approved"
-
-    # Execute approved action with mock SDK
-    with patch("orchestrator_core.core.approval_gate._dispatch_action") as mock_dispatch:
-        mock_dispatch.return_value = {"url": "https://dev.to/aaqil/fault-tolerance", "status": "published"}
-        execute_approved(approval_id, db=clean_db)
-        row_exec = clean_db.execute("SELECT status FROM approvals WHERE id = ?", (approval_id,)).fetchone()
-        assert row_exec["status"] == "executed"
-
-    # Re-queue / resume job now that approval has been handled
-    JobService.transition(job.id, "queued", clean_db)
-    claimed_again = JobService.claim_job("worker-alpha", clean_db)
-    assert claimed_again is not None
-
-    # Run loop (Phase C: Turn 3 finalization)
-    final_job = run_job(
-        job=claimed_again,
-        db=clean_db,
-        llm_client=mock_llm,
-        worker_id="worker-alpha",
-        tool_registry=tools,
-    )
-
-    assert final_job.status == "succeeded"
-    assert final_job.result_json is not None
-    assert "Article successfully published on Dev.to" in final_job.result_json
+    approval_id = clean_db.execute("SELECT id FROM approvals").fetchone()[0]
+    from orchestrator_core.exceptions import SecurityPolicyViolationError
+    with pytest.raises(SecurityPolicyViolationError):
+        approve(approval_id, clean_db, expected_hash=_review_hash(clean_db, approval_id))
 
 
 # ── Crash Resumption Verification ─────────────────────────────────────────────
@@ -300,3 +265,7 @@ def test_api_system_controls(client: TestClient):
     ks_off = client.post("/system/kill-switch", json={"on": False})
     assert ks_off.status_code == 200
     assert ks_off.json()["kill_switch"] == "off"
+
+
+def _review_hash(db, approval_id):
+    return db.execute("SELECT payload_hash FROM approvals WHERE id=?", (approval_id,)).fetchone()[0]

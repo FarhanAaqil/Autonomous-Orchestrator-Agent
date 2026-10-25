@@ -439,6 +439,7 @@
       },
       execute: async (id) => {
         const res = await fetch(`/approvals/${id}/execute`, { method: 'POST' });
+        if (!res.ok) throw new Error(`Execution refused: HTTP ${res.status}`);
         return res.json();
       },
       getEval: async () => {
@@ -1982,10 +1983,9 @@
                           onClick={async () => {
                             try {
                               await api.approve(appr.id, appr.payload_hash, appr.session_id);
-                              await api.execute(appr.id);
+                              const outcome = await api.execute(appr.id);
                               await load();
-                              const recip = appr.payload?.to_email || appr.payload?.recipient || appr.payload?.to || '';
-                              alert('✅ Action Approved & Executed! ' + (recip ? 'Email successfully sent to ' + recip : 'Action dispatched.'));
+                              alert('Execution outcome: ' + outcome.status);
                             } catch (err) {
                               alert('Approval & execution failed: ' + err.message);
                               await load();
@@ -2002,7 +2002,7 @@
                       <button
                         onClick={async () => {
                           try {
-                            await api.execute(appr.id);
+                            const outcome = await api.execute(appr.id);
                             await load();
                             const recip = appr.payload?.to_email || appr.payload?.recipient || appr.payload?.to || '';
                             alert('✅ Dispatched & Sent! ' + (recip ? 'Email sent to ' + recip : ''));

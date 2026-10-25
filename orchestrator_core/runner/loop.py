@@ -94,16 +94,9 @@ def _default_llm_call(messages: list[dict[str, str]]) -> tuple[str, int, int]:
             tokens_out = completion.usage.completion_tokens if completion.usage else max(1, len(content) // 4)
             return content, tokens_in, tokens_out
         except Exception as exc:
-            logger.warning("[runner.loop] Groq API call failed (%s). Using fallback synthesis.", exc)
+            raise RuntimeError("Model provider failed; no work was completed.") from exc
 
-    # Deterministic default synthesis if no external API key configured
-    last_msg = messages[-1]["content"] if messages else ""
-    fallback_json = json.dumps({
-        "thought": "Autonomous agent processing goal in default runner mode.",
-        "action": "final",
-        "action_input": {"summary": f"Completed task successfully based on goal: {last_msg[:120]}"},
-    })
-    return fallback_json, est_tokens_in, max(1, len(fallback_json) // 4)
+    raise RuntimeError("Model credentials are missing; no work was completed.")
 
 
 def run_job(

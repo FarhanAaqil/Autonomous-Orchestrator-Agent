@@ -163,7 +163,7 @@ def evaluate_target_policy(
 
     # Check prior successful executions
     prior = db.execute(
-        "SELECT 1 FROM approvals WHERE target = ? AND status = 'executed' LIMIT 1",
+        "SELECT 1 FROM approvals WHERE target = ? AND status = 'confirmed' LIMIT 1",
         (target,),
     ).fetchone()
 
@@ -517,7 +517,7 @@ def _transition(db, row, status, event, **fields):
         log_audit(db, actor="executor", event=event, entity_id=row["id"], detail={"status": status})
 
 
-def execute_approved(approval_id: str, db: sqlite3.Connection) -> None:
+def execute_approved(approval_id: str, db: sqlite3.Connection) -> dict:
     """
     Execute the stored action for an approved record.
 
@@ -546,7 +546,7 @@ def execute_approved(approval_id: str, db: sqlite3.Connection) -> None:
     status = row["status"]
     require_execution(db, row["source_agent"] or "orchestrator", row["action_type"])
 
-    if status == "executed":
+    if status in ("executed", "simulated", "submitted", "confirmed", "failed", "outcome_unknown"):
         raise ApprovalAlreadyExecutedError(approval_id)
 
     if status == "superseded":
@@ -612,130 +612,112 @@ def execute_approved(approval_id: str, db: sqlite3.Connection) -> None:
         )
         raise ApprovalSignatureInvalidError(approval_id)
 
-    _transition(db, row, "executing", "execution_attempted")
+    attempt_id = str(uuid.uuid4())
+    started_at = datetime.now(timezone.utc).isoformat()
+    with db:
+        changed = db.execute(
+            "UPDATE approvals SET status='executing', version=version+1 WHERE id=? AND status='approved' AND version=?",
+            (approval_id, row["version"]),
+        )
+        if changed.rowcount != 1:
+            raise ApprovalClaimConflictError(approval_id)
+        db.execute(
+            "INSERT INTO execution_attempts (id,approval_id,provider_key,outcome,started_at) VALUES (?,?,?,'outcome_unknown',?)",
+            (attempt_id, approval_id, row["idempotency_key"], started_at),
+        )
+        log_audit(db, actor="executor", event="execution_attempted", entity_id=approval_id,
+                  detail={"attempt_id": attempt_id, "provider_key": row["idempotency_key"]})
 
     try:
-        payload = json.loads(row["payload_json"])
-        _dispatch_action(
-            action_type=row["action_type"],
-            payload=payload,
-            approval_id=approval_id,
-        )
+        result = _dispatch_action(row["action_type"], json.loads(row["payload_json"]), approval_id)
+        if not isinstance(result, dict) or result.get("outcome") not in ("simulated", "submitted", "confirmed", "failed", "outcome_unknown"):
+            raise RuntimeError("Adapter returned no valid execution outcome")
     except Exception as exc:
-        log_audit(
-            db,
-            actor="executor",
-            event="execution_failed",
-            entity="approval",
-            entity_id=approval_id,
-            detail={"error": str(exc)},
+        # Once dispatch has begun, an unclassified failure cannot prove no effect.
+        result = {"outcome": "outcome_unknown", "error_class": type(exc).__name__}
+    finished_at = datetime.now(timezone.utc).isoformat()
+    with db:
+        changed = db.execute(
+            "UPDATE approvals SET status=?, executed_at=?, version=version+1 WHERE id=? AND status='executing' AND version=?",
+            (result["outcome"], finished_at, approval_id, row["version"] + 1),
         )
-        logger.exception("Dispatch failed for approval id=%s — row left in 'executing'", approval_id)
-        raise
-
-    current = dict(row)
-    current.update(status="executing", version=row["version"] + 1)
-    _transition(db, current, "executed", "execution_succeeded",
-                executed_at=datetime.now(timezone.utc).isoformat())
-
-
-# ── Dispatch action (SDK_EXECUTOR) ─────────────────────────────────────────────
-# This is the ONLY function in the codebase allowed to import email/publish SDKs.
-# All SDK imports MUST be inside this function body, not at module level.
-# Enforced by CI grep: `grep -r "smtplib\|hashnode\|devto" orchestrator_core/`
-# must return only this file.
-
-def _dispatch_action(
-    action_type: str,
-    payload: dict[str, Any],
-    approval_id: str,
-) -> None:
-    """
-    Execute the external action — email send or content publish.
-
-    STUB: SDK calls are replaced with audit log entries until the
-    real SDK integrations are wired in (post-Phase 4 sprint).
-
-    Every invocation is fully auditable:
-      - timestamp (UTC ISO)
-      - action_type
-      - payload_hash (SHA-256 of canonical JSON)
-      - approval_id (traceability back to the DB row)
-
-    # SDK_EXECUTOR: do not import email/publish SDKs elsewhere.
-    """
-    payload_json = json.dumps(payload, separators=(",", ":"), sort_keys=True)
-    payload_hash = hashlib.sha256(payload_json.encode()).hexdigest()[:16]
-    timestamp = datetime.now(timezone.utc).isoformat()
-
-    audit_record = {
-        "timestamp": timestamp,
-        "approval_id": approval_id,
-        "action_type": action_type,
-        "payload_hash": payload_hash,
-        "status": "stub_executed",
-    }
-
-    logger.info("AUDIT | _dispatch_action | %s", json.dumps(audit_record))
-
-    # Action dispatch branches
-    if action_type == "send_email":
-        import os
-        from orchestrator_core.config import get_settings
-        settings = get_settings()
-        email_addr = os.getenv("EMAIL_ADDRESS") or settings.email_address
-        email_pass = os.getenv("EMAIL_APP_PASSWORD") or settings.email_app_password
-        to_email = payload.get("to_email") or payload.get("recipient") or payload.get("to")
-        subject = payload.get("subject", "Orchestrator Notification")
-        body = payload.get("body", "")
-
-        is_test = bool(os.getenv("PYTEST_CURRENT_TEST"))
-        enable_real = (
-            os.getenv("ENABLE_REAL_EMAIL", "").lower() in ("true", "1")
-            or getattr(settings, "enable_real_email", False)
+        if changed.rowcount != 1:
+            raise ApprovalClaimConflictError(approval_id)
+        db.execute(
+            "UPDATE execution_attempts SET outcome=?, finished_at=?, receipt_json=?, error_class=? WHERE id=?",
+            (result["outcome"], finished_at, json.dumps(result.get("receipt", {})), result.get("error_class"), attempt_id),
         )
-        # Block dummy or reserved test domains from real SMTP dispatch
-        dummy_domains = ("example.com", "example.org", "example.net", "company.org", "test.com", "localhost")
-        recipient_domain = str(to_email).split("@")[-1].lower() if "@" in str(to_email) else ""
-        is_dummy_target = any(recipient_domain == d or recipient_domain.endswith("." + d) for d in dummy_domains)
+        log_audit(db, actor="executor", event="execution_outcome", entity_id=approval_id, detail=result)
+    return {"approval_id": approval_id, "attempt_id": attempt_id, "status": result["outcome"], **result}
 
-        if not is_test and enable_real and not is_dummy_target and email_addr and email_pass and to_email and "your_email" not in str(email_addr):
-            try:
-                import smtplib
-                from email.mime.text import MIMEText
 
-                clean_to = str(to_email).strip()
-                msg = MIMEText(body, "plain", "utf-8")
-                msg["Subject"] = subject
-                msg["From"] = email_addr
-                msg["To"] = clean_to
-                with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20) as server:
-                    server.login(email_addr, email_pass)
-                    server.send_message(msg)
-                logger.info("Real SMTP sent email to %s via %s", clean_to, email_addr)
-            except Exception as exc:
-                logger.error("SMTP send attempt failed: %s", exc)
-                raise RuntimeError(f"SMTP delivery failed: {exc}")
-        else:
-            logger.info(
-                "Email action logged (safe simulation / stub mode). to=%s enable_real=%s is_test=%s is_dummy=%s payload_hash=%s",
-                to_email,
-                enable_real,
-                is_test,
-                is_dummy_target,
-                payload_hash,
-            )
-    elif action_type == "publish_hashnode":
-        logger.info("Executed publish_hashnode. payload_hash=%s", payload_hash)
-    elif action_type == "publish_devto":
-        logger.info("Executed publish_devto. payload_hash=%s", payload_hash)
-    elif action_type == "github_create_issue":
-        logger.info("Executed github_create_issue. payload_hash=%s", payload_hash)
-    elif action_type == "github_comment":
-        logger.info("Executed github_comment. payload_hash=%s", payload_hash)
-    elif action_type == "linkedin_post":
-        logger.info("Executed linkedin_post. payload_hash=%s", payload_hash)
-    elif action_type == "linkedin_connect":
-        logger.info("Executed linkedin_connect. payload_hash=%s", payload_hash)
-    else:
-        logger.warning("Unknown action_type=%r. payload_hash=%s", action_type, payload_hash)
+@atomic_decision
+def reconcile_execution(approval_id, outcome, evidence, db):
+    """Owner records independently verified evidence; never resends an action."""
+    if outcome not in ("confirmed", "failed") or len(evidence.strip()) < 10:
+        raise SecurityPolicyViolationError("Reconciliation requires confirmed/failed and specific provider evidence.")
+    row = db.execute("SELECT * FROM execution_attempts WHERE approval_id=?", (approval_id,)).fetchone()
+    if row is None or row["outcome"] not in ("submitted", "outcome_unknown"):
+        raise SecurityPolicyViolationError("Only submitted or uncertain attempts can be reconciled.")
+    if row["finished_at"] is None:
+        age = datetime.now(timezone.utc) - datetime.fromisoformat(row["started_at"])
+        if age.total_seconds() < 300:
+            raise SecurityPolicyViolationError("The execution may still be active; wait at least five minutes.")
+    now = datetime.now(timezone.utc).isoformat()
+    changed = db.execute(
+        "UPDATE approvals SET status=?, version=version+1 WHERE id=? AND status IN ('executing','submitted','outcome_unknown')",
+        (outcome, approval_id),
+    )
+    if changed.rowcount != 1:
+        raise ApprovalClaimConflictError(approval_id)
+    db.execute("UPDATE execution_attempts SET outcome=?, finished_at=?, receipt_json=? WHERE approval_id=?",
+               (outcome, now, json.dumps({"owner_evidence": evidence}), approval_id))
+    log_audit(db, actor="owner", event="execution_reconciled", entity_id=approval_id,
+              detail={"outcome": outcome, "evidence": evidence})
+    return {"approval_id": approval_id, "status": outcome}
+
+
+
+def _dispatch_action(action_type: str, payload: dict[str, Any], approval_id: str) -> dict:
+    """SDK_EXECUTOR: report SMTP acceptance, never infer inbox delivery."""
+    require_adapter(action_type)
+    action_type, payload, _ = normalize_action(action_type, payload)
+    settings = get_settings()
+    if settings.action_execution_mode == "disabled":
+        return {"outcome": "failed", "error_class": "ExecutionDisabled"}
+    if settings.action_execution_mode == "simulation":
+        return {"outcome": "simulated", "receipt": {"mode": "simulation", "external_effect": False}}
+    if not (settings.enable_real_email and settings.email_address and settings.email_app_password):
+        return {"outcome": "failed", "error_class": "MissingCredentials"}
+    import smtplib
+    from email.mime.text import MIMEText
+
+    msg = MIMEText(payload["body"], "plain", "utf-8")
+    msg["Subject"] = payload["subject"]
+    msg["From"] = settings.email_address
+    msg["To"] = payload["to_email"]
+    # Stable correlation identifier. SMTP does NOT promise deduplication for it.
+    msg["Message-ID"] = f"<{approval_id}@orchestrator.local>"
+    server = None
+    try:
+        server = smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20)
+        server.login(settings.email_address, settings.email_app_password)
+    except Exception as exc:
+        if server is not None:
+            server.close()
+        return {"outcome": "failed", "error_class": type(exc).__name__}
+    try:
+        refused = server.send_message(msg)
+        if refused:
+            return {"outcome": "failed", "error_class": "RecipientRefused"}
+        return {"outcome": "submitted", "receipt": {"message_id": msg["Message-ID"], "provider": "smtp.gmail.com"}}
+    except (smtplib.SMTPRecipientsRefused, smtplib.SMTPSenderRefused, smtplib.SMTPDataError) as exc:
+        return {"outcome": "failed", "error_class": type(exc).__name__}
+    except Exception as exc:
+        return {"outcome": "outcome_unknown", "error_class": type(exc).__name__}
+    finally:
+        # A failure to close cannot change the provider acceptance already observed.
+        try:
+            server.close()
+        except Exception:
+            logger.warning("SMTP connection cleanup failed")

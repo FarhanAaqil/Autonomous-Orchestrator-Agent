@@ -75,27 +75,11 @@ def test_publish_pipeline_end_to_end_approval_flow(db):
                 execute_approved(aid, db)
             mock_dispatch.assert_not_called()
 
-            # Step 3: Human approves
-            approve(aid, db)
+            # Unsupported adapters are reviewable drafts, never executable promises.
+            from orchestrator_core.exceptions import SecurityPolicyViolationError
+            with pytest.raises(SecurityPolicyViolationError):
+                approve(aid, db, expected_hash=_review_hash(db, aid))
             mock_dispatch.assert_not_called()
-
-            # Step 4: Execute approved
-            execute_approved(aid, db)
-            assert mock_dispatch.call_count == 1
-            call_kwargs = mock_dispatch.call_args.kwargs
-            assert call_kwargs["action_type"] == "publish_hashnode"
-            assert call_kwargs["payload"]["run_id"] == run_id
-            assert call_kwargs["payload"]["content"] == fake_content
-
-            # Step 5: Verify status is executed
-            updated_row = db.execute("SELECT status, executed_at FROM approvals WHERE id = ?", (aid,)).fetchone()
-            assert updated_row["status"] == "executed"
-            assert updated_row["executed_at"] is not None
-
-            # Step 6: Replay attempt blocked
-            with pytest.raises(ApprovalAlreadyExecutedError):
-                execute_approved(aid, db)
-            assert mock_dispatch.call_count == 1
 
 
 def test_publish_pipeline_draft_only_no_approval_queued(db):
@@ -114,3 +98,7 @@ def test_publish_pipeline_draft_only_no_approval_queued(db):
             # Verify no approvals queued
             count = db.execute("SELECT COUNT(*) as cnt FROM approvals").fetchone()["cnt"]
             assert count == 0
+
+
+def _review_hash(db, approval_id):
+    return db.execute("SELECT payload_hash FROM approvals WHERE id=?", (approval_id,)).fetchone()[0]

@@ -31,7 +31,7 @@ def guard(original):
 
 socket.socket.connect = guard(original_connect)
 socket.socket.connect_ex = guard(original_connect_ex)
-with tempfile.TemporaryDirectory(prefix="orchestrator-tests-") as temp:
+with tempfile.TemporaryDirectory(prefix="orchestrator-tests-", ignore_cleanup_errors=True) as temp:
     os.environ["DATABASE_PATH"] = str(Path(temp) / "test.db")
     os.environ["CHROMA_DB_DIR"] = str(Path(temp) / "chroma")
     os.chdir(temp)

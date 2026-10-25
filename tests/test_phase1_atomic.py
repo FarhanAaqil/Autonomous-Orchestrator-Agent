@@ -49,13 +49,13 @@ def test_execute_edit_race_cannot_supersede_executed(tmp_path):
     db = get_db(str(path))
     aid, digest = seed(db)
     gate.approve(aid, db, digest)
-    with patch.object(gate, "_dispatch_action"):
+    with patch.object(gate, "_dispatch_action", return_value={"outcome": "simulated"}):
         results = race(path, [lambda c: gate.execute_approved(aid, c),
                              lambda c: gate.edit_and_supersede(aid, {**EMAIL, "body": "Changed"}, c)])
     assert sorted(results) == ["lost", "won"]
     state = db.execute("SELECT status FROM approvals WHERE id=?", (aid,)).fetchone()[0]
     replacements = db.execute("SELECT count(*) FROM approvals WHERE supersedes_id=?", (aid,)).fetchone()[0]
-    assert (state, replacements) in (("executed", 0), ("superseded", 1))
+    assert (state, replacements) in (("simulated", 0), ("superseded", 1))
     db.close()
 
 

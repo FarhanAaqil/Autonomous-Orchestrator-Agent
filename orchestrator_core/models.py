@@ -69,7 +69,7 @@ class ApprovalRecord(BaseModel):
     payload_json: str      # JSON string — immutable after creation
     target: Optional[str] = None
     payload_hash: Optional[str] = None
-    status: Literal["pending", "approved", "rejected", "executing", "executed", "expired", "superseded"]
+    status: Literal["pending", "approved", "rejected", "executing", "executed", "expired", "superseded", "simulated", "submitted", "confirmed", "failed", "outcome_unknown"]
     idempotency_key: Optional[str] = None
     approval_signature: Optional[str] = None
     approved_hash: Optional[str] = None

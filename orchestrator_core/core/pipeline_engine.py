@@ -149,7 +149,7 @@ def run_pipeline(
                 from orchestrator_core.core.approval_gate import request_approval
                 request_approval(
                     action_type=res.action_type,
-                    payload={"command": request.command, "content": res.output, "run_id": run_id},
+                    payload={"title": res.output.splitlines()[0].lstrip("# ").strip() or "Untitled draft", "content": res.output, "run_id": run_id},
                     db=db,
                 )
 

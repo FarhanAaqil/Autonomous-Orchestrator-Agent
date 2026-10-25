@@ -51,8 +51,8 @@ def test_concurrent_approve_single_claim(shared_db):
     """
     # 1. Setup row in approved state
     setup_conn = get_db(shared_db)
-    aid = request_approval("publish_hashnode", {"title": "Concurrent Post"}, setup_conn)
-    approve(aid, setup_conn)
+    aid = request_approval("send_email", {"to_email": "test@example.org", "subject": "Concurrent Post", "body": "Draft"}, setup_conn)
+    approve(aid, setup_conn, expected_hash=_review_hash(setup_conn, aid))
     setup_conn.close()
 
     dispatch_calls = 0
@@ -65,6 +65,7 @@ def test_concurrent_approve_single_claim(shared_db):
             dispatch_calls += 1
         # Sleep slightly to widen race window
         time.sleep(0.05)
+        return {"outcome": "simulated"}
 
     results = []
     exceptions = []
@@ -102,8 +103,8 @@ def test_concurrent_approve_single_claim(shared_db):
 
 def test_replay_after_execution_raises(db):
     """Calling execute_approved() on an already executed row raises ApprovalAlreadyExecutedError."""
-    aid = request_approval("send_email", {"to": "aaqil@example.com"}, db)
-    approve(aid, db)
+    aid = request_approval("send_email", {"subject": "Review", "body": "Draft", "to": "aaqil@example.com"}, db)
+    approve(aid, db, expected_hash=_review_hash(db, aid))
     execute_approved(aid, db)
 
     with pytest.raises(ApprovalAlreadyExecutedError):
@@ -116,10 +117,10 @@ def test_restart_mid_execution_reconciliation(db):
     remains in 'executing' status. It cannot be re-executed by normal calls,
     and can be detected by reconciliation queries.
     """
-    aid = request_approval("publish_devto", {"title": "Crash Test"}, db)
-    approve(aid, db)
+    aid = request_approval("send_email", {"to_email": "test@example.org", "subject": "Crash Test", "body": "Draft"}, db)
+    approve(aid, db, expected_hash=_review_hash(db, aid))
 
-    class SimulatedCrashError(Exception):
+    class SimulatedCrashError(BaseException):
         pass
 
     with patch(
@@ -144,3 +145,7 @@ def test_restart_mid_execution_reconciliation(db):
     ).fetchall()
     stuck_ids = [r["id"] for r in stuck_rows]
     assert aid in stuck_ids
+
+
+def _review_hash(db, approval_id):
+    return db.execute("SELECT payload_hash FROM approvals WHERE id=?", (approval_id,)).fetchone()[0]

@@ -120,6 +120,7 @@ def test_github_agent_golden_workflow(clean_db: sqlite3.Connection):
                 "action_type": "github_issue",
                 "target": "FarhanAaqil/orchestrater_agent",
                 "payload": {
+                    "repo": "FarhanAaqil/orchestrater_agent",
                     "title": "Bug: Zombie worker heartbeat race condition",
                     "body": "Need heartbeat refresh before reaping.",
                 },
@@ -152,22 +153,11 @@ def test_github_agent_golden_workflow(clean_db: sqlite3.Connection):
     approval_id = prop_data["approval_id"]
     assert approval_id is not None
 
-    # Human approves and executes
-    with patch("orchestrator_core.core.approval_gate._dispatch_action") as mock_dispatch:
-        mock_dispatch.return_value = None
-        approve(approval_id, db=clean_db)
-        execute_approved(approval_id, db=clean_db)
-
-    # Re-queue and resume job execution
-    JobService.transition(job.id, "queued", clean_db)
-    resumed_job = JobService.claim_job("worker-gh", clean_db)
-    assert resumed_job is not None
-
-    final_job = run_job(resumed_job, clean_db, llm_client=mock_llm, worker_id="worker-gh")
-
-    assert final_job.status == "succeeded"
-    assert final_job.result_json is not None
-    assert "GitHub issue creation proposed and completed." in final_job.result_json
+    # No real GitHub adapter exists: a draft cannot claim successful publication.
+    from orchestrator_core.exceptions import SecurityPolicyViolationError
+    with pytest.raises(SecurityPolicyViolationError):
+        approve(approval_id, clean_db, expected_hash=_review_hash(clean_db, approval_id))
+    assert clean_db.execute("SELECT status FROM approvals WHERE id=?", (approval_id,)).fetchone()[0] == "pending"
 
 
 def test_email_agent_golden_workflow(clean_db: sqlite3.Connection):
@@ -230,8 +220,8 @@ def test_email_agent_golden_workflow(clean_db: sqlite3.Connection):
     assert approval_id is not None
 
     with patch("orchestrator_core.core.approval_gate._dispatch_action") as mock_dispatch:
-        mock_dispatch.return_value = None
-        approve(approval_id, db=clean_db)
+        mock_dispatch.return_value = {"outcome": "simulated"}
+        approve(approval_id, clean_db, expected_hash=_review_hash(clean_db, approval_id))
         execute_approved(approval_id, db=clean_db)
 
     # Re-queue and resume job
@@ -310,3 +300,7 @@ def test_unauthorized_tool_call_rejected_by_runner(clean_db: sqlite3.Connection)
     # Verify that the rejected observation was recorded in job_steps
     steps = JobService.get_steps(job.id, clean_db)
     assert any(s.kind == "tool" and "not authorized" in (s.output_json or "") for s in steps)
+
+
+def _review_hash(db, approval_id):
+    return db.execute("SELECT payload_hash FROM approvals WHERE id=?", (approval_id,)).fetchone()[0]
