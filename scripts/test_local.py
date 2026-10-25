@@ -12,7 +12,7 @@ import dotenv
 dotenv.load_dotenv = lambda *args, **kwargs: False
 os.environ.update(GROQ_API_KEY="", AUTH_TOKEN="", API_BEARER_TOKEN="", ENABLE_REAL_EMAIL="false",
                   EXECUTOR_HMAC_SECRET="isolated-tests-only-secret-32-characters", ENVIRONMENT="development",
-                  ACTION_EXECUTION_MODE="simulation")
+                  ACTION_EXECUTION_MODE="simulation", ALLOW_INSECURE_LOCAL="true")
 original_connect = socket.socket.connect
 original_connect_ex = socket.socket.connect_ex
 

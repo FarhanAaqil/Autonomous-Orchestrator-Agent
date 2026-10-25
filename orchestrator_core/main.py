@@ -286,14 +286,14 @@ async def health_check():
     return {"status": "ok", "version": s.app_version, "environment": s.environment}
 
 
-@app.get("/system/circuit", tags=["System"])
+@app.get("/system/circuit", tags=["System"], dependencies=auth_dependencies)
 async def system_circuit():
     """Diagnostic endpoint to inspect the router circuit breaker status."""
     from orchestrator_core.core.router import get_circuit_status
     return get_circuit_status()
 
 
-@app.post("/system/circuit/reset", tags=["System"])
+@app.post("/system/circuit/reset", tags=["System"], dependencies=auth_dependencies)
 async def system_circuit_reset():
     """Administrative endpoint to manually reset the router circuit breaker."""
     from orchestrator_core.core.router import reset_circuit_breaker, get_circuit_status
