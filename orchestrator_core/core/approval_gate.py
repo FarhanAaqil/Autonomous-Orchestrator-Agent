@@ -35,6 +35,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from orchestrator_core.config import get_settings
+from orchestrator_core.core.action_catalog import normalize_action, require_adapter
 from orchestrator_core.exceptions import (
     ApprovalAlreadyExecutedError,
     ApprovalClaimConflictError,
@@ -187,8 +188,7 @@ def request_approval(
     Inserts a 'pending' row into the approvals table and returns the approval_id.
     Stores canonical payload and bound payload_hash.
     """
-    if target is None:
-        target = extract_target(action_type, payload)
+    action_type, payload, target = normalize_action(action_type, payload, target)
 
     # SEC-04 Idempotent request resolution
     if idempotency_key is not None:
@@ -300,6 +300,7 @@ def approve(
         raise ApprovalTamperedError(approval_id)
 
     # SEC-03: Sign approval with HMAC
+    require_adapter(row["action_type"])
     decided_at = datetime.now(timezone.utc).isoformat()
     approved_hash = stored_hash
     signature = generate_approval_signature(approval_id, approved_hash, decided_at)
@@ -387,7 +388,7 @@ def edit_and_supersede(
         )
 
     action_type = row["action_type"]
-    target = new_target or extract_target(action_type, new_payload) or row["target"]
+    action_type, new_payload, target = normalize_action(action_type, new_payload, new_target)
 
     # SEC-08 Policy check
     policy = evaluate_target_policy(action_type, target, db)

@@ -78,6 +78,8 @@ def build_system_prompt(
         base += tools_summary
     if custom_instructions:
         base += f"\nSpecial Agent Instructions:\n{custom_instructions}\n"
+    from orchestrator_core.core.action_catalog import action_schemas
+    base += "\nAction payload contracts and adapter availability:\n" + json.dumps(action_schemas())
     return base
 
 

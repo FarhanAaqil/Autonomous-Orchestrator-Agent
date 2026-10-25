@@ -17,24 +17,19 @@ from pydantic import BaseModel, Field
 
 from orchestrator_core.config import get_settings
 from orchestrator_core.core.approval_gate import request_approval
+from orchestrator_core.core.action_catalog import ACTION_CATALOG
 from orchestrator_core.storage.db import get_db
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_PROPOSAL_TYPES = {
-    "send_email",
-    "publish_hashnode",
-    "publish_devto",
-    "linkedin_post",
-    "github_create_issue",
-    "github_comment",
-}
+SUPPORTED_PROPOSAL_TYPES = frozenset(ACTION_CATALOG)
 
 
 class ProposeActionArgs(BaseModel):
     """Arguments for propose_action tool."""
     action_type: str = Field(
-        description="The side-effect action type: 'send_email', 'publish_hashnode', 'publish_devto', 'linkedin_post', 'github_create_issue', 'github_comment'."
+        description="External action type: " + ", ".join(sorted(ACTION_CATALOG)),
+        json_schema_extra={"enum": sorted(ACTION_CATALOG)},
     )
     payload: dict[str, Any] = Field(
         description="Dictionary of parameters for the action (e.g. to_email, subject, body, content, title)."
