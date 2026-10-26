@@ -1,4 +1,36 @@
 services:
+  postgres:
+    build:
+      context: .
+      dockerfile: docker/postgres/Dockerfile
+    image: orchestrator-postgres:16
+    container_name: toji_postgres
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-orchestrator}
+      POSTGRES_USER: ${POSTGRES_BOOTSTRAP_USER:-orchestrator_bootstrap}
+      POSTGRES_PASSWORD: ${POSTGRES_BOOTSTRAP_PASSWORD:?Run python scripts/setup_local_postgres.py first}
+      POSTGRES_MIGRATOR_USER: ${POSTGRES_MIGRATOR_USER:-orchestrator_migrator}
+      POSTGRES_MIGRATOR_PASSWORD: ${POSTGRES_MIGRATOR_PASSWORD:?Run python scripts/setup_local_postgres.py first}
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-orchestrator_app}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?Run python scripts/setup_local_postgres.py first}
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --auth-local=scram-sha-256
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
   orchestrator_core:
     build: .
     container_name: toji_orchestrator_core
@@ -27,3 +59,4 @@ services:
 
 volumes:
   orchestrator_data:
+  postgres_data:
