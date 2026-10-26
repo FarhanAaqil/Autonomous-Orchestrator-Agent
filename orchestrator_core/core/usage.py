@@ -8,6 +8,7 @@ from orchestrator_core.exceptions import BudgetExceededError, TokenBudgetExceede
 from orchestrator_core.jobs.leases import current_lease, require_lease
 
 usage_db = ContextVar('usage_db', default=None)
+reference_context = ContextVar('reference_context', default='')
 # Conservative configured accounting ceilings, not a claim about provider prices.
 INPUT_PER_MILLION = 10.0
 OUTPUT_PER_MILLION = 30.0

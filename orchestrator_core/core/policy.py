@@ -34,4 +34,15 @@ def execution_scope(agent, session_id=None):
 def run_handler(handler, command, db, agent, metadata=None, session_id=None):
     require_execution(db, agent)
     with execution_scope(agent, session_id):
-        return handler(command, metadata=metadata or {})
+        from orchestrator_core.core.usage import usage_db, reference_context
+        from orchestrator_core.memory.context import build_context
+        meta = dict(metadata or {})
+        context = build_context(db, session_id, command)
+        meta.update(context)
+        marker = usage_db.set(db)
+        context_marker = reference_context.set(context['conversation_history_text'] + context['memory_context'])
+        try:
+            return handler(command, metadata=meta)
+        finally:
+            reference_context.reset(context_marker)
+            usage_db.reset(marker)

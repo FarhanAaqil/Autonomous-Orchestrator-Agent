@@ -50,3 +50,6 @@ def migrate_extensions(conn):
             from orchestrator_core.storage.event_schema import install
             install(conn)
             conn.execute('INSERT INTO application_migrations VALUES (8)')
+        if not conn.execute('SELECT 1 FROM application_migrations WHERE version=9').fetchone():
+            conn.execute('ALTER TABLE memory_items ADD COLUMN vector_synced_at TEXT')
+            conn.execute('INSERT INTO application_migrations VALUES (9)')

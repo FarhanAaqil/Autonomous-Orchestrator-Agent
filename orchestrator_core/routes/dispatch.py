@@ -350,21 +350,9 @@ async def dispatch_command(
             )
 
     # 2. Retrieve last 10 messages for conversation context
-    history_rows = db.execute(
-        """
-        SELECT role, content, agent
-        FROM messages
-        WHERE conversation_id = ?
-        ORDER BY created_at ASC
-        LIMIT 10
-        """,
-        (cid,),
-    ).fetchall()
-
-    history_text = "\n".join(
-        f"{r['role'].upper()} ({r['agent'] or 'user'}): {r['content']}"
-        for r in history_rows
-    )
+    from orchestrator_core.memory.context import build_context
+    context = build_context(db, cid, body.command)
+    history_text = context['conversation_history_text']
 
     # 3. Store user message in messages table
     user_msg_id = str(uuid.uuid4())
@@ -429,6 +417,7 @@ async def dispatch_command(
         "context": body.context,
         "conversation_id": cid,
         "conversation_history_text": history_text,
+        "memory_context": context['memory_context'],
     }
     result: AgentResult = run_handler(handler, body.command, db, agent_name, agent_meta, cid)
 
@@ -504,21 +493,9 @@ async def dispatch_command_stream(body: DispatchRequest):
                     )
 
             # 2. Retrieve history context
-            history_rows = db.execute(
-                """
-                SELECT role, content, agent
-                FROM messages
-                WHERE conversation_id = ?
-                ORDER BY created_at ASC
-                LIMIT 10
-                """,
-                (cid,),
-            ).fetchall()
-
-            history_text = "\n".join(
-                f"{r['role'].upper()} ({r['agent'] or 'user'}): {r['content']}"
-                for r in history_rows
-            )
+            from orchestrator_core.memory.context import build_context
+            context = build_context(db, cid, body.command)
+            history_text = context['conversation_history_text']
 
             # 3. Store user message
             user_msg_id = str(uuid.uuid4())
@@ -577,7 +554,7 @@ async def dispatch_command_stream(body: DispatchRequest):
             # 5. Execution (streaming for general_chat_agent, handler for specialized agents)
             if agent_name == "general_chat_agent":
                 from orchestrator_core.agents import general_chat_agent
-                for token in general_chat_agent.stream_llm(body.command, context_history=history_text):
+                for token in general_chat_agent.stream_llm(body.command, context_history=history_text, memory_context=context['memory_context']):
                     accumulated_output.append(token)
                     yield f"event: token\ndata: {json.dumps({'token': token})}\n\n"
                 full_text = "".join(accumulated_output)
@@ -589,6 +566,7 @@ async def dispatch_command_stream(body: DispatchRequest):
                     "context": body.context,
                     "conversation_id": cid,
                     "conversation_history_text": history_text,
+                    "memory_context": context['memory_context'],
                 }
                 result: AgentResult = run_handler(handler, body.command, db, agent_name, agent_meta, cid)
                 full_text = result.output

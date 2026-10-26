@@ -49,6 +49,8 @@ def tick(db, now=None):
         db.execute("UPDATE approvals SET status='expired',version=version+1 WHERE status IN ('pending','approved') AND expires_at<?", (now.isoformat(),))
     reap_zombies(db)
     reconcile(db)
+    from orchestrator_core.memory.context import synchronize_vectors
+    synchronize_vectors(db)
     return queued
 
 
