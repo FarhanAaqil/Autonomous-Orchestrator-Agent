@@ -191,6 +191,8 @@ class JobRecord(BaseModel):
     claimed_by: Optional[str] = None
     claimed_at: Optional[datetime] = None
     heartbeat_at: Optional[datetime] = None
+    lease_generation: int = 0
+    lease_expires_at: Optional[datetime] = None
     step_count: int = 0
     max_steps: int = 25
     token_budget: int = 60000

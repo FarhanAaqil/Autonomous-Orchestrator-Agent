@@ -40,7 +40,7 @@ class Worker:
         tool_registry: Optional[dict[str, Callable[..., Any]]] = None,
     ) -> None:
         self.worker_id = worker_id or f"worker-{uuid.uuid4().hex[:8]}"
-        self.db_path = db_path or get_settings().database_path
+        self.db_path = db_path
         self.poll_interval = poll_interval
         self.zombie_timeout = zombie_timeout
         self.llm_client = llm_client
@@ -83,13 +83,26 @@ class Worker:
             from orchestrator_core.runner.loop import run_job
 
             logger.info("Worker %s executing claimed job %s (agent=%s)", self.worker_id, job.id, job.agent)
-            run_job(
-                job=job,
-                db=db,
-                llm_client=self.llm_client,
-                worker_id=self.worker_id,
-                tool_registry=self.tool_registry,
-            )
+            renewal_stop = threading.Event()
+            def renew():
+                # A distinct connection keeps leases alive during provider calls.
+                while not renewal_stop.wait(15):
+                    heartbeat_db = get_db(self.db_path)
+                    try:
+                        if not JobService.heartbeat(job.id, self.worker_id, heartbeat_db, job.lease_generation):
+                            return
+                    finally:
+                        heartbeat_db.close()
+            renewer = threading.Thread(target=renew, daemon=True)
+            if own_db:
+                renewer.start()
+            try:
+                run_job(job=job, db=db, llm_client=self.llm_client,
+                        worker_id=self.worker_id, tool_registry=self.tool_registry)
+            finally:
+                renewal_stop.set()
+                if own_db:
+                    renewer.join(timeout=6)
             return True
         finally:
             if own_db:

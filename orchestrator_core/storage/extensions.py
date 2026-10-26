@@ -28,3 +28,7 @@ def migrate_extensions(conn):
                 if statement.strip():
                     conn.execute(statement)
             conn.execute('INSERT INTO application_migrations VALUES (2)')
+        if not conn.execute('SELECT 1 FROM application_migrations WHERE version=3').fetchone():
+            conn.execute('ALTER TABLE jobs ADD COLUMN lease_generation INTEGER NOT NULL DEFAULT 0')
+            conn.execute('ALTER TABLE jobs ADD COLUMN lease_expires_at TEXT')
+            conn.execute('INSERT INTO application_migrations VALUES (3)')

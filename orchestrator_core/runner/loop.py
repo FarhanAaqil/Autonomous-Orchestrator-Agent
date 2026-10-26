@@ -99,6 +99,10 @@ def _default_llm_call(messages: list[dict[str, str]]) -> tuple[str, int, int]:
     raise RuntimeError("Model credentials are missing; no work was completed.")
 
 
+from orchestrator_core.jobs.leases import fenced_runner
+
+
+@fenced_runner
 def run_job(
     job: JobRecord,
     db: sqlite3.Connection,
