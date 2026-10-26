@@ -42,3 +42,7 @@ def migrate_extensions(conn):
             conn.execute("ALTER TABLE schedules ADD COLUMN timezone TEXT NOT NULL DEFAULT 'UTC'")
             conn.execute('CREATE TABLE schedule_occurrences (schedule_id TEXT NOT NULL, due_at TEXT NOT NULL, job_id TEXT NOT NULL REFERENCES jobs(id), PRIMARY KEY(schedule_id,due_at))')
             conn.execute('INSERT INTO application_migrations VALUES (6)')
+        if not conn.execute('SELECT 1 FROM application_migrations WHERE version=7').fetchone():
+            conn.execute('CREATE TABLE service_heartbeats (role TEXT PRIMARY KEY, beat_at TEXT NOT NULL)')
+            conn.execute("UPDATE schedules SET is_active=0 WHERE id IN ('daily_briefing','stale_approval_cleanup')")
+            conn.execute('INSERT INTO application_migrations VALUES (7)')

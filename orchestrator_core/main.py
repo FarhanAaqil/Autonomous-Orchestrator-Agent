@@ -64,9 +64,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     finally:
         conn.close()
 
-    start_scheduler()
     yield
-    stop_scheduler()
 
 
 settings = get_settings()
@@ -286,6 +284,21 @@ async def health_check():
     """Health check confirming service status, version, and environment."""
     s = get_settings()
     return {"status": "ok", "version": s.app_version, "environment": s.environment}
+
+
+@app.get('/ready', tags=['System'])
+def readiness_check():
+    from orchestrator_core.runtime import readiness
+    conn = None
+    try:
+        conn = get_db()
+        checks = readiness(conn)
+    except Exception:
+        checks = {'database': False}
+    finally:
+        if conn:
+            conn.close()
+    return JSONResponse(status_code=200 if all(checks.values()) else 503, content=checks)
 
 
 @app.get("/system/circuit", tags=["System"], dependencies=auth_dependencies)

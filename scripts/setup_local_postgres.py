@@ -15,11 +15,16 @@ DEFAULTS = {
     "POSTGRES_BOOTSTRAP_USER": "orchestrator_bootstrap",
     "POSTGRES_MIGRATOR_USER": "orchestrator_migrator",
     "POSTGRES_APP_USER": "orchestrator_app",
+    "ENVIRONMENT": "development",
+    "ALLOW_INSECURE_LOCAL": "false",
+    "ACTION_EXECUTION_MODE": "simulation",
 }
 SECRET_KEYS = (
     "POSTGRES_BOOTSTRAP_PASSWORD",
     "POSTGRES_MIGRATOR_PASSWORD",
     "POSTGRES_APP_PASSWORD",
+    "AUTH_TOKEN",
+    "EXECUTOR_HMAC_SECRET",
 )
 
 
