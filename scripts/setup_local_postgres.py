@@ -67,6 +67,10 @@ def main() -> None:
         f"@postgres:5432/{quote(values['POSTGRES_DB'], safe='')}"
     )
 
+    if not values.get('BACKUP_ENCRYPTION_KEY'):
+        import base64
+        additions.append('BACKUP_ENCRYPTION_KEY=' + base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())
+
     if not values.get("DATABASE_URL"):
         additions.append(f"DATABASE_URL={app_url}")
     if not values.get("MIGRATION_DATABASE_URL"):
