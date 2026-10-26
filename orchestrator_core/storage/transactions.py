@@ -4,6 +4,15 @@ import uuid
 
 
 @contextmanager
+def fenced_transaction(db):
+    from orchestrator_core.jobs.leases import current_lease, require_lease
+    with transaction(db):
+        if current_lease.get():
+            require_lease(db)
+        yield db
+
+
+@contextmanager
 def transaction(db):
     nested = db.in_transaction
     savepoint = 'sp_' + uuid.uuid4().hex

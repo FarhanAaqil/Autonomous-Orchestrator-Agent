@@ -35,7 +35,7 @@ class RunListResponse(BaseModel):
 
 
 @router.get("", response_model=RunListResponse)
-async def list_runs(
+def list_runs(
     status: Optional[str] = Query(default=None, description="Filter by status"),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
@@ -79,7 +79,7 @@ async def list_runs(
 
 
 @router.get("/{run_id}", response_model=PipelineRunStatus)
-async def get_run(run_id: str, db: sqlite3.Connection = Depends(get_db_connection)):
+def get_run(run_id: str, db: sqlite3.Connection = Depends(get_db_connection)):
     """Return a pipeline run record with all steps ordered by step_number."""
     row = db.execute(
         "SELECT run_id, pipeline_name, command, status, started_at, completed_at, error "

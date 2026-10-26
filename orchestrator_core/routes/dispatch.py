@@ -316,7 +316,7 @@ class DispatchRequest(BaseModel):
 
 
 @router.post("", response_model=None)
-async def dispatch_command(
+def dispatch_command(
     body: DispatchRequest,
     db: sqlite3.Connection = Depends(get_db_connection),
 ):
@@ -461,7 +461,7 @@ async def dispatch_command(
 
 
 @router.post("/stream")
-async def dispatch_command_stream(body: DispatchRequest):
+def dispatch_command_stream(body: DispatchRequest):
     """
     Classify and stream responses in real-time via Server-Sent Events (§5c No-Lag).
     Perceived latency drops to 200-400ms for the first token.

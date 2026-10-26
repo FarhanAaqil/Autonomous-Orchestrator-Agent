@@ -49,7 +49,7 @@ class JobListResponse(BaseModel):
 
 
 @router.get("", response_model=JobListResponse)
-async def list_jobs(
+def list_jobs(
     status: Optional[str] = Query(default=None, description="Filter by job status"),
     agent: Optional[str] = Query(default=None, description="Filter by agent"),
     thread_id: Optional[str] = Query(default=None, description="Filter by thread_id"),
@@ -73,7 +73,7 @@ async def list_jobs(
 
 
 @router.post("", response_model=JobRecord, status_code=status.HTTP_201_CREATED)
-async def create_job(
+def create_job(
     request: JobCreateRequest,
     db: sqlite3.Connection = Depends(get_db_connection),
     _token: Optional[str] = Depends(verify_bearer_token),
@@ -94,7 +94,7 @@ async def create_job(
 
 
 @router.get("/events")
-async def stream_job_events(
+def stream_job_events(
     request: Request,
     last_event_id: Optional[str] = Header(default=None, alias="Last-Event-ID"),
     last_event_id_query: Optional[str] = Query(default=None, alias="last_event_id"),
@@ -117,7 +117,7 @@ async def stream_job_events(
 
 
 @router.get("/{job_id}", response_model=JobRecord)
-async def get_job(
+def get_job(
     job_id: str,
     db: sqlite3.Connection = Depends(get_db_connection),
     _token: Optional[str] = Depends(verify_bearer_token),
@@ -133,7 +133,7 @@ async def get_job(
 
 
 @router.get("/{job_id}/steps", response_model=list[JobStepRecord])
-async def get_job_steps(
+def get_job_steps(
     job_id: str,
     db: sqlite3.Connection = Depends(get_db_connection),
     _token: Optional[str] = Depends(verify_bearer_token),
@@ -149,7 +149,7 @@ async def get_job_steps(
 
 
 @router.post("/{job_id}/cancel", response_model=JobRecord)
-async def cancel_job(
+def cancel_job(
     job_id: str,
     db: sqlite3.Connection = Depends(get_db_connection),
     _token: Optional[str] = Depends(verify_bearer_token),
@@ -170,7 +170,7 @@ async def cancel_job(
 
 
 @router.post("/{job_id}/answer", response_model=JobRecord)
-async def answer_job_question(
+def answer_job_question(
     job_id: str,
     request: JobAnswerRequest,
     db: sqlite3.Connection = Depends(get_db_connection),

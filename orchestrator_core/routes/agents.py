@@ -163,7 +163,7 @@ def _build_agent_info(
 
 
 @router.get("", response_model=list[AgentInfo])
-async def list_agents(
+def list_agents(
     response: Response,
     db: sqlite3.Connection = Depends(get_db_connection),
 ):
@@ -180,7 +180,7 @@ async def list_agents(
 
 
 @router.get("/{agent_id}", response_model=AgentInfo)
-async def get_agent(agent_id: str, db: sqlite3.Connection = Depends(get_db_connection)):
+def get_agent(agent_id: str, db: sqlite3.Connection = Depends(get_db_connection)):
     """Retrieve detailed metadata and health for a single agent."""
     canonical = canonical_agent_name(agent_id)
     match = next((m for m in _BASE_AGENTS_METADATA if m["id"] in (agent_id, canonical)), None)
@@ -190,7 +190,7 @@ async def get_agent(agent_id: str, db: sqlite3.Connection = Depends(get_db_conne
 
 
 @router.patch("/{agent_id}", response_model=AgentInfo)
-async def update_agent_status(
+def update_agent_status(
     agent_id: str,
     body: AgentUpdateRequest,
     response: Response,

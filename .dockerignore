@@ -30,7 +30,10 @@ docs/
 BASELINE.md
 
 # Eval harness & results
-eval/
+eval/results/
+eval/index.json
+**/node_modules/
+**/.env*
 
 # Tests & caches
 tests/

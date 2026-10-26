@@ -212,11 +212,16 @@ def run_job(
                 tokens_in = max(1, sum(len(m.get("content", "")) for m in messages) // 4)
                 tokens_out = max(1, len(str(raw_llm_out)) // 4)
             elif hasattr(llm_client, "chat") and hasattr(llm_client.chat, "completions"):
-                completion = llm_client.chat.completions.create(
+                from orchestrator_core.core.usage import reserve, settle
+                from orchestrator_core.core.provider import bounded_call
+                reservation, output_limit = reserve(db, messages, 2048)
+                completion = bounded_call(lambda: llm_client.chat.completions.create(
                     model=get_settings().router_model,
                     messages=messages,
                     temperature=0.2,
-                )
+                    max_tokens=output_limit,
+                ), timeout=min(30, timeout_seconds))
+                settle(db, reservation, completion.usage)
                 raw_llm_out = completion.choices[0].message.content or "{}"
                 tokens_in = completion.usage.prompt_tokens if completion.usage else 100
                 tokens_out = completion.usage.completion_tokens if completion.usage else 50

@@ -9,6 +9,7 @@ structured request logging middleware, exception mapping, and health check.
 import logging
 import time
 import uuid
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator
@@ -78,6 +79,22 @@ app = FastAPI(
 
 from fastapi.middleware.gzip import GZipMiddleware
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+_expensive_requests = asyncio.Semaphore(8)
+
+
+@app.middleware('http')
+async def bound_expensive_requests(request: Request, call_next):
+    expensive = request.method == 'POST' and request.url.path.startswith(('/dispatch', '/route', '/pipeline', '/auth/login', '/approvals'))
+    if not expensive:
+        return await call_next(request)
+    try:
+        await asyncio.wait_for(_expensive_requests.acquire(), timeout=0.05)
+    except asyncio.TimeoutError:
+        return JSONResponse(status_code=503, content={'error': 'BUSY', 'detail': 'Execution capacity is full; retry shortly'}, headers={'Retry-After': '1'})
+    try:
+        return await call_next(request)
+    finally:
+        _expensive_requests.release()
 
 
 # ── Structured request logging middleware ─────────────────────────────────────

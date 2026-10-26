@@ -43,7 +43,7 @@ class MessageResponse(BaseModel):
 
 
 @router.get("", response_model=list[ConversationResponse])
-async def list_conversations(
+def list_conversations(
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     db: sqlite3.Connection = Depends(get_db_connection),
@@ -70,7 +70,7 @@ async def list_conversations(
 
 
 @router.post("", response_model=ConversationResponse, status_code=status.HTTP_201_CREATED)
-async def create_conversation(
+def create_conversation(
     body: Optional[ConversationCreate] = None,
     db: sqlite3.Connection = Depends(get_db_connection),
 ):
@@ -95,7 +95,7 @@ async def create_conversation(
 
 
 @router.get("/{conversation_id}", response_model=ConversationResponse)
-async def get_conversation(
+def get_conversation(
     conversation_id: str,
     db: sqlite3.Connection = Depends(get_db_connection),
 ):
@@ -123,7 +123,7 @@ async def get_conversation(
 
 
 @router.get("/{conversation_id}/messages", response_model=list[MessageResponse])
-async def get_conversation_messages(
+def get_conversation_messages(
     conversation_id: str,
     limit: int = Query(default=100, ge=1, le=500),
     db: sqlite3.Connection = Depends(get_db_connection),
@@ -159,7 +159,7 @@ async def get_conversation_messages(
 
 
 @router.delete("/{conversation_id}")
-async def delete_conversation(
+def delete_conversation(
     conversation_id: str,
     db: sqlite3.Connection = Depends(get_db_connection),
 ):

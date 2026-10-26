@@ -51,7 +51,7 @@ def _to_response(rec: MemoryItemRecord) -> MemoryItemResponse:
 
 
 @router.get("", response_model=list[MemoryItemResponse])
-async def list_memories(
+def list_memories(
     kind: Optional[str] = Query(default=None, description="Filter by kind ('fact', 'preference', 'episode_summary')"),
     pending_review: Optional[bool] = Query(default=None, description="Filter by pending review status"),
     limit: int = Query(default=50, ge=1, le=200),
@@ -71,7 +71,7 @@ async def list_memories(
 
 
 @router.post("", response_model=MemoryItemResponse, status_code=status.HTTP_201_CREATED)
-async def create_memory(
+def create_memory(
     body: MemoryItemCreate,
     db: sqlite3.Connection = Depends(get_db_connection),
 ):
@@ -92,7 +92,7 @@ async def create_memory(
 
 
 @router.get("/{memory_id}", response_model=MemoryItemResponse)
-async def get_memory(
+def get_memory(
     memory_id: str,
     db: sqlite3.Connection = Depends(get_db_connection),
 ):
@@ -104,7 +104,7 @@ async def get_memory(
 
 
 @router.patch("/{memory_id}", response_model=MemoryItemResponse)
-async def update_memory(
+def update_memory(
     memory_id: str,
     body: MemoryItemUpdate,
     db: sqlite3.Connection = Depends(get_db_connection),
@@ -124,7 +124,7 @@ async def update_memory(
 
 
 @router.post("/{memory_id}/confirm", response_model=MemoryItemResponse)
-async def confirm_memory(
+def confirm_memory(
     memory_id: str,
     db: sqlite3.Connection = Depends(get_db_connection),
 ):
@@ -137,7 +137,7 @@ async def confirm_memory(
 
 
 @router.delete("/{memory_id}")
-async def delete_memory(
+def delete_memory(
     memory_id: str,
     db: sqlite3.Connection = Depends(get_db_connection),
 ):
@@ -149,7 +149,7 @@ async def delete_memory(
 
 
 @router.post("/summarize/{session_id}", response_model=MemoryItemResponse)
-async def summarize_conversation_session(
+def summarize_conversation_session(
     session_id: str,
     db: sqlite3.Connection = Depends(get_db_connection),
 ):

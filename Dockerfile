@@ -33,6 +33,7 @@ COPY --from=builder /root/.local /home/appuser/.local
 
 # Copy production core source code, database dir, and frontend UI
 COPY --chown=appuser:appgroup orchestrator_core/ /app/orchestrator_core/
+COPY --chown=appuser:appgroup eval/ /app/eval/
 COPY --chown=appuser:appgroup database/ /app/database/
 COPY --chown=appuser:appgroup frontend/ /app/frontend/
 

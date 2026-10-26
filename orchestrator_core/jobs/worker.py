@@ -83,6 +83,9 @@ class Worker:
 
             # 4. Execute claimed job
             from orchestrator_core.runner.loop import run_job
+            if job.work_kind != 'agent':
+                from orchestrator_core.jobs.background import run_background_job
+                run_job = run_background_job
 
             logger.info("Worker %s executing claimed job %s (agent=%s)", self.worker_id, job.id, job.agent)
             renewal_stop = threading.Event()

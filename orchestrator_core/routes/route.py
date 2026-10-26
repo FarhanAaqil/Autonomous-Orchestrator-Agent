@@ -21,7 +21,7 @@ class RouteRequest(BaseModel):
 
 
 @router.post("", response_model=None)
-async def route_command(body: RouteRequest) -> RouterResult | ClarificationNeeded:
+def route_command(body: RouteRequest) -> RouterResult | ClarificationNeeded:
     """
     Classify a natural-language command and return the target agent.
 

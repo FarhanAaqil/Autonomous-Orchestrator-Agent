@@ -30,7 +30,7 @@ class DailyBudgetRequest(BaseModel):
 
 
 @router.post("/kill-switch")
-async def toggle_kill_switch(
+def toggle_kill_switch(
     request: KillSwitchRequest,
     db: sqlite3.Connection = Depends(get_db_connection),
     _token: Optional[str] = Depends(verify_bearer_token),
@@ -65,7 +65,7 @@ async def toggle_kill_switch(
 
 
 @router.get("/flags", response_model=list[SystemFlagRecord])
-async def get_system_flags(
+def get_system_flags(
     db: sqlite3.Connection = Depends(get_db_connection),
     _token: Optional[str] = Depends(verify_bearer_token),
 ):
@@ -75,7 +75,7 @@ async def get_system_flags(
 
 
 @router.post("/budget")
-async def set_daily_budget(
+def set_daily_budget(
     request: DailyBudgetRequest,
     db: sqlite3.Connection = Depends(get_db_connection),
     _token: Optional[str] = Depends(verify_bearer_token),

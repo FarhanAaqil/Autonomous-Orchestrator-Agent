@@ -83,7 +83,7 @@ def _row_to_schedule(row: sqlite3.Row) -> ScheduleRecord:
 
 
 @router.get("", response_model=list[ScheduleRecord])
-async def list_schedules(
+def list_schedules(
     db: sqlite3.Connection = Depends(get_db_connection),
     _token: Optional[str] = Depends(verify_bearer_token),
 ):
@@ -93,7 +93,7 @@ async def list_schedules(
 
 
 @router.post("", response_model=ScheduleRecord, status_code=status.HTTP_201_CREATED)
-async def create_schedule(
+def create_schedule(
     body: ScheduleCreate,
     db: sqlite3.Connection = Depends(get_db_connection),
     _token: Optional[str] = Depends(verify_bearer_token),
@@ -139,7 +139,7 @@ async def create_schedule(
 
 
 @router.get("/{schedule_id}", response_model=ScheduleRecord)
-async def get_schedule(
+def get_schedule(
     schedule_id: str,
     db: sqlite3.Connection = Depends(get_db_connection),
     _token: Optional[str] = Depends(verify_bearer_token),
@@ -152,7 +152,7 @@ async def get_schedule(
 
 
 @router.patch("/{schedule_id}", response_model=ScheduleRecord)
-async def update_schedule(
+def update_schedule(
     schedule_id: str,
     body: ScheduleUpdate,
     db: sqlite3.Connection = Depends(get_db_connection),
@@ -206,7 +206,7 @@ async def update_schedule(
 
 
 @router.delete("/{schedule_id}")
-async def delete_schedule(
+def delete_schedule(
     schedule_id: str,
     db: sqlite3.Connection = Depends(get_db_connection),
     _token: Optional[str] = Depends(verify_bearer_token),
@@ -229,7 +229,7 @@ async def delete_schedule(
 
 @router.post("/{schedule_id}/run")
 @router.post("/{schedule_id}/run-now")
-async def run_schedule_now(
+def run_schedule_now(
     schedule_id: str,
     db: sqlite3.Connection = Depends(get_db_connection),
     _token: Optional[str] = Depends(verify_bearer_token),

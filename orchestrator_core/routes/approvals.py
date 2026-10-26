@@ -51,7 +51,7 @@ class ApprovalStatusUpdate(BaseModel):
 
 
 @router.get("", response_model=ApprovalListResponse)
-async def list_approvals(
+def list_approvals(
     status: Optional[str] = Query(default=None, description="Filter by status"),
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
@@ -82,7 +82,7 @@ async def list_approvals(
 
 
 @router.get("/{approval_id}", response_model=ApprovalRecord)
-async def get_approval(
+def get_approval(
     approval_id: str,
     db: sqlite3.Connection = Depends(get_db_connection),
 ):
@@ -94,7 +94,7 @@ async def get_approval(
 
 
 @router.post("/{approval_id}/approve", response_model=ApprovalStatusUpdate)
-async def approve_action(
+def approve_action(
     approval_id: str,
     body: ApprovalApproveRequest,
     db: sqlite3.Connection = Depends(get_db_connection),
@@ -119,7 +119,7 @@ async def approve_action(
 
 
 @router.post("/{approval_id}/reject", response_model=ApprovalStatusUpdate)
-async def reject_action(
+def reject_action(
     approval_id: str,
     body: Optional[ApprovalRejectRequest] = None,
     db: sqlite3.Connection = Depends(get_db_connection),
@@ -141,7 +141,7 @@ async def reject_action(
 
 
 @router.post("/{approval_id}/edit", response_model=ApprovalRecord)
-async def edit_approval_action(
+def edit_approval_action(
     approval_id: str,
     body: ApprovalEditRequest,
     db: sqlite3.Connection = Depends(get_db_connection),
@@ -153,7 +153,7 @@ async def edit_approval_action(
 
 
 @router.post("/{approval_id}/execute")
-async def execute_action(
+def execute_action(
     approval_id: str,
     db: sqlite3.Connection = Depends(get_db_connection),
 ):
@@ -162,7 +162,7 @@ async def execute_action(
 
 
 @router.get("/{approval_id}/audit")
-async def get_approval_audit_trail(
+def get_approval_audit_trail(
     approval_id: str,
     db: sqlite3.Connection = Depends(get_db_connection),
 ):
@@ -180,13 +180,13 @@ class ReconciliationRequest(BaseModel):
 
 
 @router.post("/{approval_id}/reconcile")
-async def reconcile_action(approval_id: str, body: ReconciliationRequest,
+def reconcile_action(approval_id: str, body: ReconciliationRequest,
                            db: sqlite3.Connection = Depends(get_db_connection)):
     return reconcile_execution(approval_id, body.outcome, body.evidence, db)
 
 
 @router.get("/{approval_id}/attempts")
-async def execution_attempts(approval_id: str, db: sqlite3.Connection = Depends(get_db_connection)):
+def execution_attempts(approval_id: str, db: sqlite3.Connection = Depends(get_db_connection)):
     return [dict(row) for row in db.execute(
         "SELECT * FROM execution_attempts WHERE approval_id=?", (approval_id,)
     ).fetchall()]

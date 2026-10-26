@@ -53,3 +53,7 @@ def migrate_extensions(conn):
         if not conn.execute('SELECT 1 FROM application_migrations WHERE version=9').fetchone():
             conn.execute('ALTER TABLE memory_items ADD COLUMN vector_synced_at TEXT')
             conn.execute('INSERT INTO application_migrations VALUES (9)')
+        if not conn.execute('SELECT 1 FROM application_migrations WHERE version=10').fetchone():
+            conn.execute("ALTER TABLE jobs ADD COLUMN work_kind TEXT NOT NULL DEFAULT 'agent'")
+            conn.execute("ALTER TABLE jobs ADD COLUMN work_payload_json TEXT NOT NULL DEFAULT '{}'")
+            conn.execute('INSERT INTO application_migrations VALUES (10)')

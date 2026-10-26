@@ -26,6 +26,7 @@ from typing import Any
 
 from orchestrator_core.models import PipelineRequest
 from orchestrator_core.core.policy import require_execution, run_handler
+from orchestrator_core.storage.transactions import fenced_transaction
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ def _write_step(
     error: str | None = None,
 ) -> None:
     """Write a single pipeline step record to the database."""
-    with db:
+    with fenced_transaction(db):
         db.execute(
             """
             INSERT INTO pipeline_steps
@@ -56,7 +57,7 @@ def _write_step(
                 json.dumps(input_data, default=str),
                 json.dumps(output_data, default=str),
                 latency_ms,
-                success,
+                int(success),
                 datetime.now(timezone.utc).isoformat(),
                 error,
             ),
@@ -105,7 +106,7 @@ def run_pipeline(
     started_at = datetime.now(timezone.utc).isoformat()
 
     # Create the run record
-    with db:
+    with fenced_transaction(db):
         db.execute(
             """
             INSERT INTO pipeline_runs (run_id, pipeline_name, command, status, started_at)
@@ -157,7 +158,7 @@ def run_pipeline(
             raise ValueError(f"Unknown pipeline: {pipeline_name!r}. Supported: research, apply, publish")
 
         # Mark completed
-        with db:
+        with fenced_transaction(db):
             db.execute(
                 "UPDATE pipeline_runs SET status = 'completed', completed_at = ? WHERE run_id = ?",
                 (datetime.now(timezone.utc).isoformat(), run_id),
@@ -165,7 +166,7 @@ def run_pipeline(
         logger.info("Pipeline complete — run_id=%s", run_id)
 
     except Exception as exc:
-        with db:
+        with fenced_transaction(db):
             db.execute(
                 "UPDATE pipeline_runs SET status = 'failed', completed_at = ?, error = ? WHERE run_id = ?",
                 (datetime.now(timezone.utc).isoformat(), str(exc), run_id),

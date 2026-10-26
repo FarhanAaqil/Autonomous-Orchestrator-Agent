@@ -192,6 +192,8 @@ class JobRecord(BaseModel):
     claimed_at: Optional[datetime] = None
     heartbeat_at: Optional[datetime] = None
     lease_generation: int = 0
+    work_kind: str = 'agent'
+    work_payload_json: str = '{}'
     lease_expires_at: Optional[datetime] = None
     step_count: int = 0
     max_steps: int = 25
