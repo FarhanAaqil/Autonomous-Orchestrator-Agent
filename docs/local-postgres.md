@@ -34,6 +34,25 @@ database is intended.
 
 ## Security model
 
+## Application migration
+
+The application now selects PostgreSQL when `DATABASE_URL` is set. Production
+and staging require it. Run schema migrations separately with
+`python -m orchestrator_core.storage.migrate` and `MIGRATION_DATABASE_URL`.
+For commands on Windows, use `127.0.0.1` as the URL host; Compose uses `postgres`.
+The API role only checks the schema version and never runs DDL.
+
+To retain existing application state, stop its writers and run
+`python -m orchestrator_core.storage.import_sqlite database/orchestrator.db`.
+The source is read-only and destination inserts commit together. Existing
+destination application records cause the import to stop without replacement.
+The SQLite source remains the rollback copy. Do not resume writes to both stores.
+Legacy `tracker.db` is a separate experimental database and is not imported.
+
+Connections are capped at 12 per process, with five-second acquisition/connect
+timeouts, five-second lock waits, and fifteen-second statement timeouts.
+Database errors propagate rather than falling back to SQLite.
+
 - `orchestrator_bootstrap` initializes the container and is not given to the app.
 - `orchestrator_migrator` owns the application schema and performs migrations.
 - `orchestrator_app` receives data access on objects created by the migrator but

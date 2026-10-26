@@ -258,6 +258,10 @@ def _migrate_approval_states(conn):
 
 def run_migrations(conn: sqlite3.Connection) -> None:
     """Execute initial schema migrations creating all required tables and indexes."""
+    if getattr(conn, 'dialect', None) == 'postgresql':
+        from orchestrator_core.storage.postgres import verify_schema
+        verify_schema(conn)
+        return
     _migrate_approval_states(conn)
     with conn:
         # Check and migrate columns on existing approvals table if needed before creating indexes
@@ -345,6 +349,9 @@ def get_db(db_path: Optional[str] = None) -> sqlite3.Connection:
     """Create and configure a new SQLite connection with cloud-drive lock resilience."""
     import time
     if db_path is None:
+        if get_settings().database_url:
+            from orchestrator_core.storage.postgres import connect
+            return connect(get_settings().database_url)
         db_path = get_settings().database_path
 
     # In-memory database or path on filesystem
@@ -398,6 +405,8 @@ class SQLiteConnectionPool:
 
     def get(self, db_path: Optional[str] = None) -> sqlite3.Connection:
         if db_path is None:
+            if get_settings().database_url:
+                return get_db()
             db_path = get_settings().database_path
 
         if db_path == ":memory:":
@@ -424,6 +433,10 @@ class SQLiteConnectionPool:
         return get_db(db_path)
 
     def release(self, conn: sqlite3.Connection, db_path: Optional[str] = None) -> None:
+        if getattr(conn, 'dialect', None) == 'postgresql':
+            conn.close()
+            return
+        conn.rollback()
         if db_path is None:
             db_path = get_settings().database_path
 
@@ -450,6 +463,8 @@ class SQLiteConnectionPool:
             pass
 
     def close_all(self) -> None:
+        from orchestrator_core.storage.postgres import close_pools
+        close_pools()
         with self._lock:
             for q in self._pools.values():
                 while not q.empty():
