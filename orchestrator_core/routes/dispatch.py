@@ -14,7 +14,7 @@ import time
 from typing import Optional
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 import json
 from pydantic import BaseModel
@@ -461,10 +461,10 @@ def dispatch_command(
 
 
 @router.post("/stream")
-def dispatch_command_stream(body: DispatchRequest):
+def dispatch_command_stream(body: DispatchRequest, request: Request):
     """
     Classify and stream responses in real-time via Server-Sent Events (§5c No-Lag).
-    Perceived latency drops to 200-400ms for the first token.
+    Provider output is buffered within its deadline; no first-token latency is promised.
     """
     def event_stream():
         t_start = time.monotonic()
@@ -606,4 +606,31 @@ def dispatch_command_stream(body: DispatchRequest):
         finally:
             db.close()
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    def authorized_events():
+        from orchestrator_core.core.identity import principal
+        token = request.cookies.get('orchestrator_session')
+        def allowed():
+            if not token:
+                return True
+            check = get_db()
+            try:
+                user = principal(check, token)
+                return user is not None and user['role'] != 'viewer'
+            finally:
+                check.close()
+        stream = event_stream()
+        try:
+            while True:
+                if not allowed():
+                    yield 'event: session.expired\ndata: {}\n\n'
+                    return
+                chunk = next(stream, None)
+                if chunk is None:
+                    return
+                if not allowed():
+                    yield 'event: session.expired\ndata: {}\n\n'
+                    return
+                yield chunk
+        finally:
+            stream.close()
+    return StreamingResponse(authorized_events(), media_type="text/event-stream")

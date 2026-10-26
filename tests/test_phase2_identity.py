@@ -61,3 +61,23 @@ def test_browser_csrf_and_role_boundaries(db):
         assert client.post('/auth/logout', headers={'x-csrf-token': response.json()['csrf_token']}).status_code == 200
     finally:
         app.dependency_overrides.clear()
+
+
+def test_dispatch_does_not_emit_after_session_revocation(monkeypatch):
+    import asyncio
+    from starlette.requests import Request
+    from orchestrator_core.routes import dispatch
+    calls = []
+    class Check:
+        def close(self):
+            pass
+    monkeypatch.setattr(dispatch, 'get_db', lambda: Check())
+    monkeypatch.setattr(identity, 'principal', lambda *_: None)
+    monkeypatch.setattr(dispatch, 'classify', lambda *_: calls.append('provider'))
+    request = Request({'type': 'http', 'headers': [(b'cookie', b'orchestrator_session=revoked')]})
+    response = dispatch.dispatch_command_stream(dispatch.DispatchRequest(command='hello'), request)
+    async def collect():
+        return [item async for item in response.body_iterator]
+    events = asyncio.run(collect())
+    assert events == ['event: session.expired\ndata: {}\n\n']
+    assert not calls
