@@ -29,6 +29,7 @@ from orchestrator_core.models import (
     canonical_agent_name,
 )
 from orchestrator_core.storage.db import log_audit
+from orchestrator_core.storage.transactions import transaction
 from orchestrator_core.jobs.leases import current_lease, require_lease, expires
 
 logger = logging.getLogger(__name__)
@@ -71,7 +72,7 @@ class JobService:
         created_at = datetime.now(timezone.utc).isoformat()
         not_before_str = not_before.isoformat() if not_before else None
 
-        with db:
+        with transaction(db):
             if current_lease.get():
                 require_lease(db)
             db.execute(
@@ -173,7 +174,7 @@ class JobService:
         Selects highest priority / oldest queued job ready to run.
         """
         now = datetime.now(timezone.utc).isoformat()
-        with db:
+        with transaction(db):
             cur = db.execute(
                 """
                 UPDATE jobs
@@ -223,7 +224,7 @@ class JobService:
         now = datetime.now(timezone.utc).isoformat()
         lease = current_lease.get()
         generation = generation if generation is not None else (lease[2] if lease and lease[:2] == (job_id, worker_id) else -1)
-        with db:
+        with transaction(db):
             cur = db.execute(
                 """
                 UPDATE jobs
@@ -266,7 +267,7 @@ class JobService:
             else (str(new_heartbeat) if new_heartbeat is not None else None)
         )
 
-        with db:
+        with transaction(db):
             if current_lease.get():
                 require_lease(db, job_id)
             elif job.status == 'running' and target_status != 'cancelled':
@@ -342,7 +343,7 @@ class JobService:
         delta_tokens = (tokens_in or 0) + (tokens_out or 0)
         delta_cost = cost_usd or 0.0
 
-        with db:
+        with transaction(db):
             job = JobService.get_job(job_id, db)
             if job is None:
                 raise JobNotFoundError(job_id)

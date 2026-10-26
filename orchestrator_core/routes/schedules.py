@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from orchestrator_core.dependencies import verify_bearer_token
 from orchestrator_core.jobs.service import JobService
@@ -30,6 +30,7 @@ class ScheduleRecord(BaseModel):
     agent: str
     goal: str
     cron_expr: str
+    timezone: str = 'UTC'
     is_active: bool
     last_run_at: Optional[str] = None
     next_run_at: Optional[str] = None
@@ -43,6 +44,16 @@ class ScheduleCreate(BaseModel):
     goal: str = Field(min_length=1)
     cron_expr: str = Field(default="0 8 * * *", min_length=1)
     is_active: bool = True
+    timezone: str = 'UTC'
+
+    @model_validator(mode='after')
+    def valid_cron(self):
+        from orchestrator_core.core.scheduler import next_occurrence
+        try:
+            next_occurrence(self.cron_expr, self.timezone, datetime.now(timezone.utc))
+        except Exception as exc:
+            raise ValueError('Invalid cron expression or timezone') from exc
+        return self
 
 
 class ScheduleUpdate(BaseModel):
@@ -51,6 +62,7 @@ class ScheduleUpdate(BaseModel):
     goal: Optional[str] = None
     cron_expr: Optional[str] = None
     is_active: Optional[bool] = None
+    timezone: Optional[str] = None
 
 
 def _row_to_schedule(row: sqlite3.Row) -> ScheduleRecord:
@@ -61,6 +73,7 @@ def _row_to_schedule(row: sqlite3.Row) -> ScheduleRecord:
         agent=d["agent"],
         goal=d["goal"],
         cron_expr=d["cron_expr"],
+        timezone=d.get('timezone', 'UTC'),
         is_active=bool(d["is_active"]),
         last_run_at=d["last_run_at"],
         next_run_at=d["next_run_at"],
@@ -89,11 +102,14 @@ async def create_schedule(
     schedule_id = f"sched_{uuid.uuid4().hex[:10]}"
     now = datetime.now(timezone.utc).isoformat()
 
+    from orchestrator_core.core.scheduler import next_occurrence
+    following = next_occurrence(body.cron_expr, body.timezone, datetime.now(timezone.utc))
+
     with db:
         db.execute(
             """
-            INSERT INTO schedules (id, name, agent, goal, cron_expr, is_active, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO schedules (id, name, agent, goal, cron_expr, is_active, created_at, updated_at, timezone, next_run_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 schedule_id,
@@ -104,6 +120,8 @@ async def create_schedule(
                 1 if body.is_active else 0,
                 now,
                 now,
+                body.timezone,
+                following,
             ),
         )
 
@@ -148,6 +166,14 @@ async def update_schedule(
     updates = []
     params = []
     now = datetime.now(timezone.utc).isoformat()
+    from orchestrator_core.core.scheduler import next_occurrence
+    try:
+        following = next_occurrence(body.cron_expr or row['cron_expr'], body.timezone or row['timezone'], datetime.now(timezone.utc))
+    except Exception as exc:
+        raise HTTPException(422, 'Invalid cron expression or timezone') from exc
+    if body.cron_expr is not None or body.timezone is not None or body.is_active is not None:
+        updates.extend(['next_run_at = ?', 'timezone = ?'])
+        params.extend([following, body.timezone or row['timezone']])
 
     if body.name is not None:
         updates.append("name = ?")
