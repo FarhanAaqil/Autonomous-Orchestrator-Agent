@@ -81,7 +81,7 @@ def _default_llm_call(messages: list[dict[str, str]]) -> tuple[str, int, int]:
 
     if settings.groq_api_key:
         try:
-            from groq import Groq
+            from orchestrator_core.core.provider import Groq
             client = Groq(api_key=settings.groq_api_key)
             completion = client.chat.completions.create(
                 model=settings.router_model,
@@ -195,11 +195,17 @@ def run_job(
         t0 = time.monotonic()
         try:
             if callable(llm_client):
-                raw_llm_out = llm_client(messages)
+                from orchestrator_core.core.provider import bounded_call
+                from orchestrator_core.core.usage import reserve
+                reserve(db, messages, min(2048, job.token_budget))
+                raw_llm_out = bounded_call(lambda: llm_client(messages), timeout=min(30, timeout_seconds))
                 tokens_in = max(1, sum(len(m.get("content", "")) for m in messages) // 4)
                 tokens_out = max(1, len(str(raw_llm_out)) // 4)
             elif hasattr(llm_client, "complete"):
-                raw_llm_out = llm_client.complete(messages)
+                from orchestrator_core.core.provider import bounded_call
+                from orchestrator_core.core.usage import reserve
+                reserve(db, messages, min(2048, job.token_budget))
+                raw_llm_out = bounded_call(lambda: llm_client.complete(messages), timeout=min(30, timeout_seconds))
                 tokens_in = max(1, sum(len(m.get("content", "")) for m in messages) // 4)
                 tokens_out = max(1, len(str(raw_llm_out)) // 4)
             elif hasattr(llm_client, "chat") and hasattr(llm_client.chat, "completions"):

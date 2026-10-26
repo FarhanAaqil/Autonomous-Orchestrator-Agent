@@ -40,10 +40,21 @@ def fenced_runner(fn):
                 raise JobClaimConflictError(bound.arguments['job'].id)
             bound.arguments['job'] = job
         marker = current_lease.set((job.id, worker, job.lease_generation))
+        from orchestrator_core.core.usage import usage_db
+        usage_marker = usage_db.set(db)
         try:
             with db:
                 require_lease(db, job.id)
-            return fn(*bound.args, **bound.kwargs)
+            try:
+                return fn(*bound.args, **bound.kwargs)
+            except JobClaimConflictError:
+                return JobService.get_job(job.id, db)
+            except Exception as exc:
+                from orchestrator_core.exceptions import JobError
+                if not isinstance(exc, JobError):
+                    raise
+                return JobService.transition(job.id, 'failed', db, error=str(exc), worker_id=worker)
         finally:
+            usage_db.reset(usage_marker)
             current_lease.reset(marker)
     return run

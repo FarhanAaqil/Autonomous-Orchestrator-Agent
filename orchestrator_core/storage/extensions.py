@@ -35,3 +35,6 @@ def migrate_extensions(conn):
         if not conn.execute('SELECT 1 FROM application_migrations WHERE version=4').fetchone():
             conn.execute("CREATE TABLE job_dependencies (id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES jobs(id), kind TEXT NOT NULL CHECK(kind IN ('approval','child')), target_id TEXT NOT NULL, resolved INTEGER NOT NULL DEFAULT 0, outcome_json TEXT, UNIQUE(job_id,kind,target_id))")
             conn.execute('INSERT INTO application_migrations VALUES (4)')
+        if not conn.execute('SELECT 1 FROM application_migrations WHERE version=5').fetchone():
+            conn.execute("CREATE TABLE provider_usage (id TEXT PRIMARY KEY, job_id TEXT, used_at TEXT NOT NULL, reserved_tokens INTEGER NOT NULL, reserved_cost REAL NOT NULL, tokens_in INTEGER, tokens_out INTEGER, cost_usd REAL, state TEXT NOT NULL)")
+            conn.execute('INSERT INTO application_migrations VALUES (5)')

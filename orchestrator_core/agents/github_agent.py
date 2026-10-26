@@ -15,7 +15,7 @@ import re
 import os
 from typing import Any, Optional
 
-from groq import Groq
+from orchestrator_core.core.provider import Groq
 import requests
 
 from orchestrator_core.config import get_settings

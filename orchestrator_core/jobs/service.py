@@ -348,6 +348,12 @@ class JobService:
                 raise JobNotFoundError(job_id)
             if job.status == 'running' or current_lease.get():
                 require_lease(db, job_id)
+            if job.step_count >= job.max_steps:
+                from orchestrator_core.exceptions import MaxStepsExceededError
+                raise MaxStepsExceededError(job_id, job.step_count, job.max_steps)
+            if job.tokens_used + delta_tokens > job.token_budget:
+                from orchestrator_core.exceptions import TokenBudgetExceededError
+                raise TokenBudgetExceededError(job_id, job.tokens_used + delta_tokens, job.token_budget)
             db.execute(
                 """
                 INSERT INTO job_steps (
