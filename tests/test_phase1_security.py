@@ -14,6 +14,7 @@ from orchestrator_core.main import app
 ])
 def test_production_rejects_insecure_configuration(values):
     defaults = dict(environment="production", auth_token="a-private-token-with-at-least-32-characters",
+                    database_url="postgresql://app:private-test-password-long-enough@localhost/test",
                     executor_hmac_secret="independent-secret-with-randomness-0123456789",
                     allow_insecure_local=False, _env_file=None)
     defaults.update(values)
@@ -38,7 +39,7 @@ def test_circuit_reset_requires_auth():
 
 
 def test_route_inventory_has_explicit_auth_boundary():
-    public = {"/health", "/", "/ui"}
+    public = {"/health", "/ready", "/auth/login", "/", "/ui"}
     for route in app.routes:
         if isinstance(route, APIRoute) and route.path not in public:
             assert any(d.call is verify_bearer_token for d in route.dependant.dependencies), route.path

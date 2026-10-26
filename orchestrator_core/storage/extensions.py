@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS login_limits (
 
 
 def migrate_extensions(conn):
-    with conn:
+    from orchestrator_core.storage.transactions import transaction
+    with transaction(conn):
         conn.execute('CREATE TABLE IF NOT EXISTS application_migrations (version INTEGER PRIMARY KEY)')
         if getattr(conn, 'dialect', None) == 'postgresql':
             conn.execute('SELECT pg_advisory_xact_lock(74201902)')

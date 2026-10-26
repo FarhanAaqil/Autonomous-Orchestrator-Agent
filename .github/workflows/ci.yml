@@ -8,8 +8,18 @@ on:
 
 jobs:
   test:
-    name: Phase 1 Security Gate
+    name: Focused security and persistence gate
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: phase2_test
+          POSTGRES_PASSWORD: disposable-phase2-test-password
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d phase2_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       ENVIRONMENT: development
       ALLOW_INSECURE_LOCAL: "true"
@@ -17,6 +27,7 @@ jobs:
       ENABLE_REAL_EMAIL: "false"
       EXECUTOR_HMAC_SECRET: ci-only-signing-secret-with-32-characters
       GROQ_API_KEY: ""
+      PHASE2_TEST_DATABASE_URL: postgresql://postgres:disposable-phase2-test-password@127.0.0.1:5432/phase2_test
 
     steps:
       - name: Checkout repository
@@ -68,6 +79,9 @@ jobs:
             tests/test_phase1_outcomes.py \
             tests/test_phase1_network.py \
             tests/test_phase1_exit.py
+
+      - name: Run focused Phase 2 regressions
+        run: python scripts/test_local.py tests/test_phase2_*.py
 
       - name: Router Eval CI Gate (Frozen Test Split)
         run: |

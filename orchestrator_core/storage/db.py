@@ -259,8 +259,9 @@ def _migrate_approval_states(conn):
 def run_migrations(conn: sqlite3.Connection) -> None:
     """Execute initial schema migrations creating all required tables and indexes."""
     if getattr(conn, 'dialect', None) == 'postgresql':
-        from orchestrator_core.storage.postgres import verify_schema
+        from orchestrator_core.storage.postgres import verify_schema, verify_runtime_role
         verify_schema(conn)
+        verify_runtime_role(conn)
         return
     _migrate_approval_states(conn)
     with conn:
