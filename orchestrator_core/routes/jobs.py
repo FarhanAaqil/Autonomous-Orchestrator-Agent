@@ -18,7 +18,7 @@ import logging
 import sqlite3
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -95,6 +95,7 @@ async def create_job(
 
 @router.get("/events")
 async def stream_job_events(
+    request: Request,
     last_event_id: Optional[str] = Header(default=None, alias="Last-Event-ID"),
     last_event_id_query: Optional[str] = Query(default=None, alias="last_event_id"),
     _token: Optional[str] = Depends(verify_bearer_token),
@@ -105,7 +106,7 @@ async def stream_job_events(
     """
     effective_id = last_event_id or last_event_id_query
     return StreamingResponse(
-        event_hub.subscribe(last_event_id=effective_id),
+        event_hub.subscribe(last_event_id=effective_id, session_token=request.cookies.get('orchestrator_session')),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

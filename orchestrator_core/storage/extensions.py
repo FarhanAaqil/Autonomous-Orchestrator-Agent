@@ -46,3 +46,7 @@ def migrate_extensions(conn):
             conn.execute('CREATE TABLE service_heartbeats (role TEXT PRIMARY KEY, beat_at TEXT NOT NULL)')
             conn.execute("UPDATE schedules SET is_active=0 WHERE id IN ('daily_briefing','stale_approval_cleanup')")
             conn.execute('INSERT INTO application_migrations VALUES (7)')
+        if not conn.execute('SELECT 1 FROM application_migrations WHERE version=8').fetchone():
+            from orchestrator_core.storage.event_schema import install
+            install(conn)
+            conn.execute('INSERT INTO application_migrations VALUES (8)')
