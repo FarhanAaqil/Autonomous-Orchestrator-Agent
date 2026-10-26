@@ -60,6 +60,8 @@ administrative credentials and must never be embedded in browser code.
   Its OUTPUT chain defaulted to DROP. Only the read gateway was reachable in the
   direct socket probes; public, private and metadata probes were blocked.
   A real Chromium navigation to the metadata URL returned a policy denial, 403.
+  The container health probe uses explicit IPv4 loopback because IPv6 egress
+  is deliberately blocked; localhost could otherwise time out on its IPv6 address.
 - The actual imported database was encrypted into
   backups/phase2-cutover-2026-10-26.dump.enc (201784 bytes, about 0.39 seconds).
   It restored into a disposable database in about 0.25 seconds; all 21 approvals

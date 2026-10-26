@@ -40,7 +40,7 @@ EXPOSE 8888
 
 # Healthcheck
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8888/health')" || exit 1
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8888/health', timeout=2)" || exit 1
 
 # Launch lightweight RPC server
 CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8888", "--workers", "1"]
