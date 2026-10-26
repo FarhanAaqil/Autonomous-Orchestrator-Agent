@@ -32,3 +32,6 @@ def migrate_extensions(conn):
             conn.execute('ALTER TABLE jobs ADD COLUMN lease_generation INTEGER NOT NULL DEFAULT 0')
             conn.execute('ALTER TABLE jobs ADD COLUMN lease_expires_at TEXT')
             conn.execute('INSERT INTO application_migrations VALUES (3)')
+        if not conn.execute('SELECT 1 FROM application_migrations WHERE version=4').fetchone():
+            conn.execute("CREATE TABLE job_dependencies (id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES jobs(id), kind TEXT NOT NULL CHECK(kind IN ('approval','child')), target_id TEXT NOT NULL, resolved INTEGER NOT NULL DEFAULT 0, outcome_json TEXT, UNIQUE(job_id,kind,target_id))")
+            conn.execute('INSERT INTO application_migrations VALUES (4)')

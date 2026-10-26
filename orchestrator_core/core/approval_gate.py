@@ -287,6 +287,12 @@ def request_approval(
         },
     )
 
+    from orchestrator_core.jobs.leases import current_lease
+    from orchestrator_core.jobs.dependencies import attach
+    lease = current_lease.get()
+    if lease:
+        attach(db, lease[0], 'approval', approval_id)
+
     logger.info(
         "Approval queued — id=%s action_type=%s target=%s expires_at=%s hash=%s",
         approval_id, action_type, target, expires_at.isoformat(), payload_hash,

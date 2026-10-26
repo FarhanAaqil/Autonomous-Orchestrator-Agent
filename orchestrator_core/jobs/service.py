@@ -101,6 +101,10 @@ class JobService:
                 ),
             )
 
+            if parent_job_id:
+                from orchestrator_core.jobs.dependencies import attach
+                attach(db, parent_job_id, 'child', job_id)
+
         log_audit(
             db,
             actor="jobs_service",

@@ -71,6 +71,8 @@ class Worker:
 
             # 2. Reap zombies
             reaped = reap_zombies(db, timeout_seconds=self.zombie_timeout)
+            from orchestrator_core.jobs.dependencies import reconcile
+            reconcile(db)
             if reaped:
                 logger.info("Worker %s: reaped %d zombie jobs", self.worker_id, len(reaped))
 
