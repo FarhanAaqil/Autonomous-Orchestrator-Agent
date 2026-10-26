@@ -26,6 +26,8 @@ env/
 *.sublime-project
 
 # Database & SQLite files
+backups/
+*.dump.enc
 *.db
 *.sqlite
 *.sqlite3
