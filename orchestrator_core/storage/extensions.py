@@ -1,0 +1,30 @@
+"""Ordered schema extensions shared by PostgreSQL and development SQLite."""
+
+IDENTITY_SQL = """
+CREATE TABLE IF NOT EXISTS users (
+ id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
+ role TEXT NOT NULL CHECK(role IN ('administrator','operator','viewer')),
+ active INTEGER NOT NULL DEFAULT 1, version INTEGER NOT NULL DEFAULT 1,
+ created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sessions (
+ token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id),
+ user_version INTEGER NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+CREATE TABLE IF NOT EXISTS login_limits (
+ key TEXT PRIMARY KEY, attempts INTEGER NOT NULL, reset_at TEXT NOT NULL
+);
+"""
+
+
+def migrate_extensions(conn):
+    with conn:
+        conn.execute('CREATE TABLE IF NOT EXISTS application_migrations (version INTEGER PRIMARY KEY)')
+        if getattr(conn, 'dialect', None) == 'postgresql':
+            conn.execute('SELECT pg_advisory_xact_lock(74201902)')
+        if not conn.execute('SELECT 1 FROM application_migrations WHERE version=2').fetchone():
+            for statement in IDENTITY_SQL.split(';'):
+                if statement.strip():
+                    conn.execute(statement)
+            conn.execute('INSERT INTO application_migrations VALUES (2)')

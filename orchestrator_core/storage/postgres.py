@@ -112,6 +112,8 @@ def migrate(conn):
         conn.execute('SELECT pg_advisory_xact_lock(74201902)')
         conn.execute('CREATE TABLE IF NOT EXISTS schema_versions (version INTEGER PRIMARY KEY)')
         if conn.execute('SELECT 1 FROM schema_versions WHERE version=1').fetchone():
+            from orchestrator_core.storage.extensions import migrate_extensions
+            migrate_extensions(conn)
             return
         schema = SCHEMA_SQL.replace('INTEGER PRIMARY KEY AUTOINCREMENT', 'BIGSERIAL PRIMARY KEY')
         # Preserve exact serialized timestamps used by signed consent records.
@@ -124,6 +126,8 @@ def migrate(conn):
                 conn.execute(statement)
         conn.execute("INSERT INTO system_flags (key,value) VALUES ('kill_switch','off'), ('daily_budget_usd','5.00') ON CONFLICT DO NOTHING")
         conn.execute('INSERT INTO schema_versions VALUES (1)')
+        from orchestrator_core.storage.extensions import migrate_extensions
+        migrate_extensions(conn)
 
 
 def verify_schema(conn):

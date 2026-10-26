@@ -1,56 +1,42 @@
-"""
-orchestrator_core/dependencies.py
-
-Security and authentication dependencies for FastAPI routes.
-Enforces Bearer token verification against environment configuration.
-"""
-
-from __future__ import annotations
-
+"""Session and service authentication, with centralized role and CSRF checks."""
 import secrets
 from typing import Optional
 
-from fastapi import Depends, HTTPException, Query, Security, status
+from fastapi import Depends, HTTPException, Request, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from orchestrator_core.config import Settings, get_settings
+from orchestrator_core.storage.db import get_db_connection
 
 security = HTTPBearer(auto_error=False)
 
 
 def verify_bearer_token(
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Security(security),
-    token: Optional[str] = Query(default=None, alias="token"),
     settings: Settings = Depends(get_settings),
-) -> Optional[str]:
-    """
-    Validate incoming HTTP Bearer token against settings.auth_token.
-
-    Contract:
-      - If settings.auth_token is None or empty (e.g. unconfigured local dev/test environment),
-        authentication is bypassed to allow unauthenticated development.
-      - If settings.auth_token is configured (production / staging / secured deployment),
-        a valid matching Authorization: Bearer <token> header or ?token= query parameter
-        is required (supporting browser EventSource which cannot set custom headers).
-        Missing or mismatching credentials raise 401 Unauthorized.
-    """
-    expected_token = settings.auth_token
-    if not expected_token:
-        return None
-
-    provided_token = credentials.credentials if (credentials and credentials.credentials) else token
-    if not provided_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or malformed Authorization header",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    if not secrets.compare_digest(provided_token, expected_token):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    return provided_token
+    db=Depends(get_db_connection),
+):
+    from orchestrator_core.core.identity import principal, csrf_token
+    token = request.cookies.get('orchestrator_session')
+    user = None
+    if token:
+        user = principal(db, token)
+        if not user:
+            raise HTTPException(401, 'Session expired or revoked')
+        if request.method not in ('GET', 'HEAD', 'OPTIONS'):
+            supplied = request.headers.get('x-csrf-token', '')
+            if not secrets.compare_digest(supplied, csrf_token(token)):
+                raise HTTPException(403, 'CSRF verification failed')
+    elif credentials and settings.auth_token and secrets.compare_digest(credentials.credentials, settings.auth_token):
+        user = {'id': 'service', 'username': 'service', 'role': 'administrator'}
+    elif settings.allow_insecure_local and settings.environment == 'development' and not settings.auth_token:
+        user = {'id': 'local-development', 'username': 'local-development', 'role': 'administrator'}
+    if not user:
+        raise HTTPException(401, 'Authentication required', headers={'WWW-Authenticate': 'Bearer'})
+    mutation = request.method not in ('GET', 'HEAD', 'OPTIONS')
+    admin_path = request.url.path.startswith(('/system/', '/auth/users', '/agents/'))
+    if mutation and request.url.path not in ('/auth/logout', '/auth/password') and (user['role'] == 'viewer' or (admin_path and user['role'] != 'administrator')):
+        raise HTTPException(403, 'This operation requires a higher role')
+    request.state.principal = user
+    return user['id']

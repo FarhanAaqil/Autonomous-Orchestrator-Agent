@@ -294,6 +294,8 @@ def run_migrations(conn: sqlite3.Connection) -> None:
                 conn.execute("ALTER TABLE approvals ADD COLUMN decided_at TIMESTAMP;")
 
         conn.executescript(SCHEMA_SQL)
+        from orchestrator_core.storage.extensions import migrate_extensions
+        migrate_extensions(conn)
 
         # Seed system control flags if not already present
         conn.execute(

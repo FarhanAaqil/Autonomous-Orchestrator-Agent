@@ -262,6 +262,8 @@ from orchestrator_core.routes import memory as memory_module
 from orchestrator_core.routes import schedules as schedules_module
 
 auth_dependencies = [Depends(verify_bearer_token)]
+from orchestrator_core.routes.auth import router as auth_router
+app.include_router(auth_router)
 
 app.include_router(route_module.router, dependencies=auth_dependencies)
 app.include_router(dispatch_module.router, dependencies=auth_dependencies)
