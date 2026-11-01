@@ -44,6 +44,11 @@ administrative credentials and must never be embedded in browser code.
 
 ## Evidence
 
+Final deployment recheck on 2026-11-01: Docker Desktop was restarted, Compose
+startup completed, the corrected sandbox healthcheck reported healthy, and
+/ready returned 200 with all four dependencies ready. No full-suite rerun was
+performed. Healthcheck correction: commit 4739d00.
+
 - 34 focused Phase 2 checks passed across the implementation and follow-up runs;
   a separate encrypted backup/restore regression also passed.
 - The 65-test focused CI security gate passed locally. Ruff and diff checks
