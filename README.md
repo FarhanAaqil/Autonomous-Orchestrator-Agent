@@ -4,7 +4,8 @@
 
 # Autonomous Orchestrator Agent v1.0.0
 
-[![CI](https://github.com/FarhanAaqil/orchestrator_agent/actions/workflows/ci.yml/badge.svg)](https://github.com/FarhanAaqil/orchestrator_agent/actions/workflows/ci.yml)
+[![CI](https://github.com/FarhanAaqil/Autonomous-Orchestrator-Agent/actions/workflows/ci.yml/badge.svg)]
+(https://github.com/FarhanAaqil/Autonomous-Orchestrator-Agent/actions/workflows/ci.yml)
 ![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)
 ![React 18](https://img.shields.io/badge/frontend-React%2018%20SPA-61dafb.svg)
