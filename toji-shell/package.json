@@ -2,11 +2,12 @@
   "name": "toji-shell",
   "productName": "Toji",
   "version": "1.0.0",
-  "description": "Toji — Desktop presence shell for the Orchestrator Agent",
+  "description": "Toji \u2014 Desktop presence shell for the Orchestrator Agent",
   "main": "main.js",
   "scripts": {
-    "start": "cross-env NODE_PATH=C:\\Users\\aaqil\\toji-shell-deps\\node_modules C:\\Users\\aaqil\\toji-shell-deps\\node_modules\\.bin\\electron.cmd .",
-    "dev": "cross-env TOJI_DEV=1 NODE_PATH=C:\\Users\\aaqil\\toji-shell-deps\\node_modules C:\\Users\\aaqil\\toji-shell-deps\\node_modules\\.bin\\electron.cmd . --enable-logging",
+    "start": "electron .",
+    "dev": "electron . --enable-logging",
+    "test": "node --test endpoint.test.js",
     "pack": "electron-builder --dir",
     "dist": "electron-builder --win"
   },
@@ -18,25 +19,17 @@
     },
     "files": [
       "main.js",
-      "preload.js",
-      "tray-manager.js",
-      "window-manager.js",
-      "sidecar.js",
-      "assets/**/*",
-      "voice/**/*"
-    ],
-    "extraResources": [
-      {
-        "from": "resources",
-        "to": "."
-      }
+      "endpoint.js",
+      "assets/toji-tray.ico",
+      "assets/toji-tray.png"
     ],
     "win": {
       "target": [
         "nsis",
         "portable"
       ],
-      "icon": "assets/toji-tray.ico"
+      "icon": "assets/toji-tray.ico",
+      "signAndEditExecutable": false
     },
     "nsis": {
       "oneClick": false,
@@ -55,11 +48,8 @@
   "author": "Farhan Aaqil",
   "license": "MIT",
   "devDependencies": {
-    "cross-env": "^7.0.3",
-    "electron": "^32.2.0",
-    "electron-builder": "^24.13.3"
+    "electron": "45.2.3",
+    "electron-builder": "26.18.0"
   },
-  "dependencies": {
-    "electron-store": "^8.2.0"
-  }
+  "dependencies": {}
 }
