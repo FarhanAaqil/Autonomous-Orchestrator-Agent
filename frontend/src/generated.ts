@@ -298,7 +298,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** List Users */
+        get: operations["list_users_auth_users_get"];
         put?: never;
         /** Create User */
         post: operations["create_user_auth_users_post"];
@@ -2243,6 +2244,26 @@ export interface operations {
             };
         };
     };
+    list_users_auth_users_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     create_user_auth_users_post: {
         parameters: {
             query?: never;
@@ -2442,6 +2463,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
+                offset?: number;
             };
             header?: never;
             path: {

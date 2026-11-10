@@ -126,6 +126,7 @@ def get_conversation(
 def get_conversation_messages(
     conversation_id: str,
     limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     db: sqlite3.Connection = Depends(get_db_connection),
 ):
     """Retrieve message history for a conversation thread in chronological order."""
@@ -139,11 +140,12 @@ def get_conversation_messages(
         SELECT id, conversation_id, role, content, agent, created_at
         FROM messages
         WHERE conversation_id = ?
-        ORDER BY created_at ASC
-        LIMIT ?
+        ORDER BY created_at DESC, id DESC
+        LIMIT ? OFFSET ?
         """,
-        (conversation_id, limit),
+        (conversation_id, limit, offset),
     ).fetchall()
+    rows.reverse()
 
     return [
         MessageResponse(

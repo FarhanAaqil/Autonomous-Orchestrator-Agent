@@ -55,6 +55,13 @@ class AccountCreate(Credentials):
     role: str = 'operator'
 
 
+@router.get('/users', dependencies=[Depends(verify_bearer_token)])
+def list_users(request: Request, db=Depends(get_db_connection)):
+    if request.state.principal['role'] != 'administrator':
+        raise HTTPException(403, 'Only administrators can list accounts')
+    return [dict(row) for row in db.execute('SELECT id,username,role,active FROM users ORDER BY username').fetchall()]
+
+
 class PasswordChange(BaseModel):
     current_password: str = Field(max_length=1024, repr=False)
     new_password: str = Field(min_length=14, max_length=1024, repr=False)

@@ -63,6 +63,9 @@ def _get_agent_registry() -> dict:
 
 def _handle_operational_command(command: str, db: sqlite3.Connection, conversation_id: str) -> Optional[AgentResult]:
     lower = command.lower().strip()
+    if lower in ('kill switch on', 'enable kill switch', 'activate kill switch',
+                 'kill switch off', 'disable kill switch', 'deactivate kill switch'):
+        raise SecurityPolicyViolationError('Change automation through the administrator controls in Settings.')
     require_execution(db)
 
     # 1. Pipelines

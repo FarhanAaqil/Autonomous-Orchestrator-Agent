@@ -2658,6 +2658,28 @@
       }
     },
     "/auth/users": {
+      "get": {
+        "operationId": "list_users_auth_users_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Users",
+        "tags": [
+          "Authentication"
+        ]
+      },
       "post": {
         "operationId": "create_user_auth_users_post",
         "requestBody": {
@@ -2989,6 +3011,17 @@
               "maximum": 500,
               "minimum": 1,
               "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
               "type": "integer"
             }
           }
