@@ -25,6 +25,9 @@ dashboard/
 utils/
 
 # Planning docs & contracts
+archive/
+frontend/dist/
+toji-shell/
 New plan/
 docs/
 BASELINE.md

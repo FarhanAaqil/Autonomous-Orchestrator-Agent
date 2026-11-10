@@ -300,7 +300,7 @@ app.include_router(schedules_module.router, dependencies=auth_dependencies)
 async def health_check():
     """Health check confirming service status, version, and environment."""
     s = get_settings()
-    return {"status": "ok", "version": s.app_version, "environment": s.environment}
+    return {"status": "ok", "service": "toji-orchestrator", "version": s.app_version, "environment": s.environment}
 
 
 @app.get('/ready', tags=['System'])
@@ -336,11 +336,11 @@ async def system_circuit_reset():
 
 # ── Static UI / Frontend Serving ──────────────────────────────────────────────
 
-FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 INDEX_HTML = FRONTEND_DIR / "index.html"
 
-if FRONTEND_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
+if (FRONTEND_DIR / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIR / "assets")), name="assets")
 
 
 @app.get("/", include_in_schema=False)
@@ -350,7 +350,9 @@ async def serve_ui():
     if INDEX_HTML.exists():
         return FileResponse(
             INDEX_HTML,
-            headers={"Cache-Control": "public, max-age=300, stale-while-revalidate=600"},
+            headers={"Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff",
+                     "Referrer-Policy": "same-origin",
+                     "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"},
         )
     return JSONResponse(status_code=404, content={"error": "UI index.html not found"})
 
