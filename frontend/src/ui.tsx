@@ -1,30 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
 import type { ReactNode, FormEvent } from 'react';
-import { request, pretty } from './api';
-export function useResource<T>(path: string, initial: T, tick = 0) {
-  const [data, setData] = useState(initial); const [error, setError] = useState(''); const [loading, setLoading] = useState(true);
-  const [version, setVersion] = useState(0);
-  const reload = useCallback(() => setVersion(v => v + 1), []);
-  useEffect(() => {
-    const controller = new AbortController(); let active = true;
-    setLoading(true); setError('');
-    request<T>(path, 'GET', undefined, controller.signal).then(value => {if (active) setData(value);})
-      .catch(e => {if (active && e.name !== 'AbortError') setError(e.message);})
-      .finally(() => {if (active) setLoading(false);});
-    return () => {active = false; controller.abort();};
-  }, [path, version, tick]);
-  return {data, error, loading, reload};
-}
-export function useAction(reload?: () => void) {
-  const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [notice, setNotice] = useState('');
-  async function act(path: string, method = 'POST', body?: unknown) {
-    setBusy(true); setError(''); setNotice('');
-    try { const result = await request<Record<string, unknown>>(path, method, body); reload?.(); setNotice('Saved.'); return result; }
-    catch (e) {setError(e instanceof Error ? e.message : 'The request failed.'); return undefined;}
-    finally {setBusy(false);}
-  }
-  return {act, busy, error, notice};
-}
+import { pretty } from './api';
 export function Banner({error, notice}: {error?: string; notice?: string}) {
   return <>{error && <p role="alert" className="banner error">{error}</p>}{notice && <p role="status" className="banner">{notice}</p>}</>;
 }

@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useAction, useResource } from './hooks';
+import { useEffect, useState } from 'react';
 import type { Approval, Job, Page } from './api';
 import { pretty } from './api';
 import type { Props } from './pages';
-import { Banner, Empty, Field, Form, Json, PageHead, Pager, Pill, useAction, useResource } from './ui';
+import { Banner, Empty, Field, Form, Json, PageHead, Pager, Pill } from './ui';
 export function Jobs({user, tick}: Props) {
   const [offset, setOffset] = useState(0); const [filter, setFilter] = useState(''); const [selected, setSelected] = useState('');
   const list = useResource<Page<Job>>('/jobs?limit=20&offset=' + offset + (filter ? '&status=' + filter : ''), {items: [], total: 0, limit: 20, offset: 0}, tick);
@@ -40,9 +41,11 @@ function Review({id, user, close}: {id: string; user: Props['user']; close: () =
   const approval = useResource<Approval | null>('/approvals/' + id, null);
   const audit = useResource<unknown[]>('/approvals/' + id + '/audit', []);
   const attempts = useResource<unknown[]>('/approvals/' + id + '/attempts', []);
-  const action = useAction(() => {approval.reload(); audit.reload(); attempts.reload(); setChecked(false);});
   const [checked, setChecked] = useState(false); const a = approval.data;
-  const expired = a?.expires_at ? Date.parse(a.expires_at) <= Date.now() : false;
+  const action = useAction(() => {approval.reload(); audit.reload(); attempts.reload(); setChecked(false);});
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer);}, []);
+  const expired = a?.expires_at ? Date.parse(a.expires_at) <= now : false;
   return <section className="panel review"><div className="section-title"><h2>Review proposal</h2><button onClick={close}>Close review</button></div><Banner error={approval.error || audit.error || attempts.error || action.error} notice={action.notice}/>
     {a && <><div className="review-facts"><div><small>Action</small><strong>{a.action_type}</strong></div><div><small>Destination</small><strong>{a.target || 'See payload below'}</strong></div><div><small>Mode</small><strong>{a.execution_mode}</strong></div><div><small>Expires</small><strong>{a.expires_at ? new Date(a.expires_at).toLocaleString() : 'No expiry supplied'}</strong></div></div><Pill value={a.status}/><h3>Exact proposed content</h3><Json value={a.payload_json}/><details><summary>Content fingerprint and conversation</summary><p className="hash">{a.payload_hash}</p><p className="hash">{a.session_id || 'No conversation attached'}</p></details>
       {a.execution_mode === 'simulation' && <p className="banner">Simulation: no external delivery will occur. A simulated result is not confirmation of a real action.</p>}

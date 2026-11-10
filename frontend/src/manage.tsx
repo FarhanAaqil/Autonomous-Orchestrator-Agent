@@ -1,9 +1,10 @@
+import { useAction, useResource } from './hooks';
 import { useState } from 'react';
 import type { Props } from './pages';
 import type { Agent, Memory, Schedule } from './api';
 import { request } from './api';
 import { JobDetail } from './work';
-import { Banner, Empty, Field, Form, Json, PageHead, Pill, useAction, useResource } from './ui';
+import { Banner, Empty, Field, Form, Json, PageHead, Pill } from './ui';
 export function Schedules({user, tick}: Props) {
   const list = useResource<Schedule[]>('/schedules', [], tick); const action = useAction(list.reload);
   const [editing, setEditing] = useState<Schedule | null>(null);

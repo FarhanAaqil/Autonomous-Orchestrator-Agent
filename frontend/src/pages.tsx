@@ -1,8 +1,9 @@
+import { useResource } from './hooks';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, Layers3, Plus, Send, Square, RefreshCw } from 'lucide-react';
 import { dispatch, request } from './api';
 import type { Agent, Approval, Conversation, Job, Message, Page, User } from './api';
-import { Banner, Empty, PageHead, Pill, useResource } from './ui';
+import { Banner, Empty, PageHead, Pill } from './ui';
 export { Jobs, Approvals } from './work';
 export { Schedules, Memories, Pipelines, Evaluation, Settings } from './manage';
 export type Props = {user: User; tick: number; navigate: (tab: string) => void};
