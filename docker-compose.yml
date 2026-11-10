@@ -1,11 +1,64 @@
+x-runtime: &runtime
+  build: .
+  image: orchestrator-runtime:local
+  restart: unless-stopped
+  environment: &runtime-env
+    DATABASE_URL: ${DATABASE_URL:?Run the local setup script}
+    ENVIRONMENT: ${ENVIRONMENT:-development}
+    ALLOW_INSECURE_LOCAL: "false"
+    AUTH_TOKEN: ${AUTH_TOKEN:?Run the local setup script}
+    EXECUTOR_HMAC_SECRET: ${EXECUTOR_HMAC_SECRET:?Run the local setup script}
+    ACTION_EXECUTION_MODE: ${ACTION_EXECUTION_MODE:-simulation}
+    ENABLE_REAL_EMAIL: "false"
+    GROQ_API_KEY: ${GROQ_API_KEY:-}
+    ROUTER_MODEL: ${ROUTER_MODEL:-openai/gpt-oss-120b}
+    SANDBOX_BROWSER_URL: http://browser_sandbox:8888
+  volumes:
+    - orchestrator_data:/app/data
+  networks: [default, isolated]
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+
 services:
+  postgres:
+    build:
+      context: .
+      dockerfile: docker/postgres/Dockerfile
+    image: orchestrator-postgres:16
+    container_name: toji_postgres
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-orchestrator}
+      POSTGRES_USER: ${POSTGRES_BOOTSTRAP_USER:-orchestrator_bootstrap}
+      POSTGRES_PASSWORD: ${POSTGRES_BOOTSTRAP_PASSWORD:?Run python scripts/setup_local_postgres.py first}
+      POSTGRES_MIGRATOR_USER: ${POSTGRES_MIGRATOR_USER:-orchestrator_migrator}
+      POSTGRES_MIGRATOR_PASSWORD: ${POSTGRES_MIGRATOR_PASSWORD:?Run python scripts/setup_local_postgres.py first}
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-orchestrator_app}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?Run python scripts/setup_local_postgres.py first}
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --auth-local=scram-sha-256
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
   orchestrator_core:
-    build: .
+    <<: *runtime
     container_name: toji_orchestrator_core
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
-    env_file: .env
     deploy:
       resources:
         limits:
@@ -25,5 +78,47 @@ services:
       timeout: 3s
       retries: 3
 
+  migrate:
+    build: .
+    image: orchestrator-runtime:local
+    command: [python, -m, orchestrator_core.storage.migrate]
+    restart: "no"
+    environment:
+      MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:?Run the local setup script}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker:
+    <<: *runtime
+    command: [python, -m, orchestrator_core.runtime, worker]
+    healthcheck:
+      disable: true
+
+  scheduler:
+    <<: *runtime
+    command: [python, -m, orchestrator_core.runtime, scheduler]
+    healthcheck:
+      disable: true
+
+  browser_sandbox:
+    extends:
+      file: docker/browser_sandbox/docker-compose.sandbox.yml
+      service: browser_sandbox
+  read_gateway:
+    extends:
+      file: docker/browser_sandbox/docker-compose.sandbox.yml
+      service: read_gateway
+
+networks:
+  default: {}
+  isolated:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.90.0/24
+  outbound: {}
+
 volumes:
   orchestrator_data:
+  postgres_data:

@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT))
 import dotenv
 dotenv.load_dotenv = lambda *args, **kwargs: False
 os.environ.update(GROQ_API_KEY="", AUTH_TOKEN="", API_BEARER_TOKEN="", ENABLE_REAL_EMAIL="false",
+                  DATABASE_URL="", MIGRATION_DATABASE_URL="",
                   EXECUTOR_HMAC_SECRET="isolated-tests-only-secret-32-characters", ENVIRONMENT="development",
                   ACTION_EXECUTION_MODE="simulation", ALLOW_INSECURE_LOCAL="true")
 original_connect = socket.socket.connect

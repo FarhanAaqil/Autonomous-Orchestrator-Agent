@@ -1,6 +1,14 @@
 # Multi-stage Dockerfile for Orchestrator Agent Core Service
 
 # ── Stage 1: Build dependencies ──
+FROM node:24-slim AS frontend-build
+WORKDIR /ui
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --ignore-scripts --no-audit --no-fund
+COPY frontend/index.html frontend/tsconfig.json frontend/tsconfig.app.json frontend/tsconfig.node.json frontend/vite.config.ts ./
+COPY frontend/src ./src
+RUN npm run build
+
 FROM python:3.11-slim AS builder
 
 WORKDIR /build
@@ -33,8 +41,9 @@ COPY --from=builder /root/.local /home/appuser/.local
 
 # Copy production core source code, database dir, and frontend UI
 COPY --chown=appuser:appgroup orchestrator_core/ /app/orchestrator_core/
+COPY --chown=appuser:appgroup eval/ /app/eval/
 COPY --chown=appuser:appgroup database/ /app/database/
-COPY --chown=appuser:appgroup frontend/ /app/frontend/
+COPY --from=frontend-build --chown=appuser:appgroup /ui/dist/ /app/frontend/dist/
 
 # Create database and runtime directories with correct permissions
 RUN mkdir -p /app/database /app/data && chown -R appuser:appgroup /app

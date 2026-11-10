@@ -78,7 +78,12 @@ def browse(req: BrowseRequest):
             context.route("**/*", boundary.handle)
             logger.info("Page scripts, service workers, forms and native egress disabled")
 
-            response = page.goto(req.url, wait_until="domcontentloaded", timeout=req.timeout_ms)
+            try:
+                response = page.goto(req.url, wait_until="domcontentloaded", timeout=req.timeout_ms)
+            except Exception:
+                if boundary.error:
+                    raise HTTPException(403, detail=boundary.error)
+                raise
             if boundary.error:
                 raise HTTPException(403, detail=boundary.error)
             final_url = boundary.final_url

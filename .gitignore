@@ -26,6 +26,8 @@ env/
 *.sublime-project
 
 # Database & SQLite files
+backups/
+*.dump.enc
 *.db
 *.sqlite
 *.sqlite3
@@ -45,6 +47,8 @@ chroma_db/
 *.log
 *.pid
 test-reports/
+frontend/test-results/
+frontend/playwright-report/
 *.test.log
 
 # Runtime cache artifacts

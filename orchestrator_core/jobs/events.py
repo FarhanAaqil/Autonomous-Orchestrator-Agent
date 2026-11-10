@@ -1,89 +1,66 @@
-"""
-orchestrator_core/jobs/events.py
-
-In-memory event hub for SSE streaming of real-time job state transitions and step traces.
-"""
-
-from __future__ import annotations
-
+"""Durable SSE replay shared by API and worker processes."""
 import asyncio
 import json
-import logging
-from datetime import datetime, timezone
-from typing import Any, AsyncGenerator, Optional
-
-logger = logging.getLogger(__name__)
 
 
 class JobEventHub:
-    """Manages active SSE subscriber queues for job events with Last-Event-ID replay."""
+    def __init__(self, history_size=200):
+        self.history_size = history_size
 
-    def __init__(self, history_size: int = 200) -> None:
-        self._subscribers: set[asyncio.Queue[str]] = set()
-        self._counter: int = 0
-        self._history: list[tuple[int, str]] = []  # (event_id, formatted_sse_msg)
-        self._history_size = history_size
-
-    def publish(self, event_type: str, data: dict[str, Any]) -> None:
-        """Publish an event with monotonic ID to history and all connected subscriber queues."""
-        self._counter += 1
-        event_id = self._counter
-        payload = {
-            "id": event_id,
-            "event": event_type,
-            "data": data,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-        msg = f"id: {event_id}\nevent: {event_type}\ndata: {json.dumps(payload)}\n\n"
-
-        # Retain recent events for Last-Event-ID reconnection replay
-        self._history.append((event_id, msg))
-        if len(self._history) > self._history_size:
-            self._history.pop(0)
-
-        dead_queues = []
-        for q in self._subscribers:
-            try:
-                q.put_nowait(msg)
-            except asyncio.QueueFull:
-                dead_queues.append(q)
-
-        for q in dead_queues:
-            self._subscribers.discard(q)
-
-    async def subscribe(self, last_event_id: Optional[str] = None) -> AsyncGenerator[str, None]:
-        """
-        Async generator yielding SSE formatted strings to a client.
-        Replays buffered events if last_event_id is provided.
-        """
-        queue: asyncio.Queue[str] = asyncio.Queue(maxsize=100)
-
-        # Replay missed events if client reconnected with Last-Event-ID
-        if last_event_id is not None:
-            try:
-                last_id_int = int(last_event_id)
-                for eid, emsg in self._history:
-                    if eid > last_id_int:
-                        queue.put_nowait(emsg)
-            except (ValueError, asyncio.QueueFull):
-                pass
-
-        self._subscribers.add(queue)
+    def publish(self, event_type, data, db=None):
+        if event_type.startswith('job.'):
+            return  # Database triggers capture these atomically.
+        from orchestrator_core.storage.db import get_db
+        from orchestrator_core.storage.transactions import transaction
+        own = db is None
+        db = db or get_db()
         try:
-            # If no replayed events are ready, immediately yield an initial comment so Starlette/ASGI
-            # flushes HTTP 200 headers to the browser EventSource without waiting for a new event.
-            if queue.empty():
-                yield ": connected\n\n"
-            while True:
-                try:
-                    msg = await asyncio.wait_for(queue.get(), timeout=15.0)
-                    yield msg
-                except asyncio.TimeoutError:
-                    # Keep-alive heartbeat ping preventing proxy/browser dropped connection
-                    yield ": ping\n\n"
+            with transaction(db):
+                if getattr(db, 'dialect', None) == 'postgresql':
+                    db.execute('SELECT pg_advisory_xact_lock(74201903)')
+                db.execute('INSERT INTO job_events(event,data_json) VALUES (?,?)', (event_type, json.dumps(data)))
         finally:
-            self._subscribers.discard(queue)
+            if own:
+                db.close()
+
+    def read(self, after, session_token=None):
+        from orchestrator_core.storage.db import get_db
+        from orchestrator_core.core.identity import principal
+        db = get_db()
+        try:
+            if session_token and not principal(db, session_token):
+                return None, None
+            bounds = db.execute('SELECT MIN(id),MAX(id) FROM job_events').fetchone()
+            rows = db.execute('SELECT * FROM job_events WHERE id>? ORDER BY id LIMIT 100', (after,)).fetchall()
+            return bounds, [dict(row) for row in rows]
+        finally:
+            db.close()
+
+    async def subscribe(self, last_event_id=None, session_token=None):
+        try:
+            cursor = max(0, int(last_event_id or 0))
+        except ValueError:
+            cursor = 0
+        yield ': connected\n\n'
+        first = True
+        while True:
+            bounds, rows = await asyncio.to_thread(self.read, cursor, session_token)
+            if rows is None:
+                yield 'event: session.expired\ndata: {}\n\n'
+                return
+            minimum, maximum = bounds[0] or 0, bounds[1] or 0
+            if first and (cursor > maximum or (cursor and cursor < minimum-1)):
+                cursor = maximum
+                yield f'id: {cursor}\nevent: snapshot.required\ndata: {{}}\n\n'
+                rows = []
+            first = False
+            for row in rows:
+                cursor = row['id']
+                payload = json.dumps({'id': cursor, 'event': row['event'], 'data': json.loads(row['data_json'])})
+                yield f"id: {cursor}\nevent: {row['event']}\ndata: {payload}\n\n"
+            if not rows:
+                yield ': ping\n\n'
+                await asyncio.sleep(1)
 
 
-# Global singleton event hub instance
 event_hub = JobEventHub()

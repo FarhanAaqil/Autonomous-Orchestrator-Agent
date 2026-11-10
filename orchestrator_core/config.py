@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     """Application settings read from environment variables and .env file."""
 
     database_path: str = "database/orchestrator.db"
+    database_url: Optional[str] = Field(default=None, repr=False)
     chroma_db_dir: str = "chroma_db"
     groq_api_key: Optional[str] = None
     router_model: str = "openai/gpt-oss-120b"
@@ -84,6 +85,13 @@ class Settings(BaseSettings):
         if not token and (secured or not self.allow_insecure_local):
             raise ValueError("AUTH_TOKEN is required; local development must explicitly set ALLOW_INSECURE_LOCAL=true")
         if secured:
+            from urllib.parse import urlsplit, unquote
+            database = urlsplit(self.database_url or '')
+            password = unquote(database.password or '')
+            if database.scheme not in ('postgresql', 'postgresql+psycopg') or not database.hostname or not database.username:
+                raise ValueError('Production and staging require a PostgreSQL DATABASE_URL')
+            if len(password) < 24 or password.lower().startswith(('replace_', 'password', 'postgres')):
+                raise ValueError('PostgreSQL requires a strong non-default password')
             if len(token) < 32:
                 raise ValueError("Secured environments require an AUTH_TOKEN of at least 32 characters")
             secret = self.executor_hmac_secret.strip()

@@ -19,7 +19,7 @@ import hashlib
 import time
 from typing import Union
 
-from groq import Groq
+from orchestrator_core.core.provider import Groq
 
 from orchestrator_core.config import get_settings
 from orchestrator_core.core.circuit_breaker import CircuitBreaker

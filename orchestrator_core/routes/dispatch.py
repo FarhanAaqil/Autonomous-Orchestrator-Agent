@@ -14,7 +14,7 @@ import time
 from typing import Optional
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 import json
 from pydantic import BaseModel
@@ -63,6 +63,9 @@ def _get_agent_registry() -> dict:
 
 def _handle_operational_command(command: str, db: sqlite3.Connection, conversation_id: str) -> Optional[AgentResult]:
     lower = command.lower().strip()
+    if lower in ('kill switch on', 'enable kill switch', 'activate kill switch',
+                 'kill switch off', 'disable kill switch', 'deactivate kill switch'):
+        raise SecurityPolicyViolationError('Change automation through the administrator controls in Settings.')
     require_execution(db)
 
     # 1. Pipelines
@@ -316,7 +319,7 @@ class DispatchRequest(BaseModel):
 
 
 @router.post("", response_model=None)
-async def dispatch_command(
+def dispatch_command(
     body: DispatchRequest,
     db: sqlite3.Connection = Depends(get_db_connection),
 ):
@@ -350,21 +353,9 @@ async def dispatch_command(
             )
 
     # 2. Retrieve last 10 messages for conversation context
-    history_rows = db.execute(
-        """
-        SELECT role, content, agent
-        FROM messages
-        WHERE conversation_id = ?
-        ORDER BY created_at ASC
-        LIMIT 10
-        """,
-        (cid,),
-    ).fetchall()
-
-    history_text = "\n".join(
-        f"{r['role'].upper()} ({r['agent'] or 'user'}): {r['content']}"
-        for r in history_rows
-    )
+    from orchestrator_core.memory.context import build_context
+    context = build_context(db, cid, body.command)
+    history_text = context['conversation_history_text']
 
     # 3. Store user message in messages table
     user_msg_id = str(uuid.uuid4())
@@ -429,6 +420,7 @@ async def dispatch_command(
         "context": body.context,
         "conversation_id": cid,
         "conversation_history_text": history_text,
+        "memory_context": context['memory_context'],
     }
     result: AgentResult = run_handler(handler, body.command, db, agent_name, agent_meta, cid)
 
@@ -472,10 +464,10 @@ async def dispatch_command(
 
 
 @router.post("/stream")
-async def dispatch_command_stream(body: DispatchRequest):
+def dispatch_command_stream(body: DispatchRequest, request: Request):
     """
     Classify and stream responses in real-time via Server-Sent Events (§5c No-Lag).
-    Perceived latency drops to 200-400ms for the first token.
+    Provider output is buffered within its deadline; no first-token latency is promised.
     """
     def event_stream():
         t_start = time.monotonic()
@@ -504,21 +496,9 @@ async def dispatch_command_stream(body: DispatchRequest):
                     )
 
             # 2. Retrieve history context
-            history_rows = db.execute(
-                """
-                SELECT role, content, agent
-                FROM messages
-                WHERE conversation_id = ?
-                ORDER BY created_at ASC
-                LIMIT 10
-                """,
-                (cid,),
-            ).fetchall()
-
-            history_text = "\n".join(
-                f"{r['role'].upper()} ({r['agent'] or 'user'}): {r['content']}"
-                for r in history_rows
-            )
+            from orchestrator_core.memory.context import build_context
+            context = build_context(db, cid, body.command)
+            history_text = context['conversation_history_text']
 
             # 3. Store user message
             user_msg_id = str(uuid.uuid4())
@@ -577,7 +557,7 @@ async def dispatch_command_stream(body: DispatchRequest):
             # 5. Execution (streaming for general_chat_agent, handler for specialized agents)
             if agent_name == "general_chat_agent":
                 from orchestrator_core.agents import general_chat_agent
-                for token in general_chat_agent.stream_llm(body.command, context_history=history_text):
+                for token in general_chat_agent.stream_llm(body.command, context_history=history_text, memory_context=context['memory_context']):
                     accumulated_output.append(token)
                     yield f"event: token\ndata: {json.dumps({'token': token})}\n\n"
                 full_text = "".join(accumulated_output)
@@ -589,6 +569,7 @@ async def dispatch_command_stream(body: DispatchRequest):
                     "context": body.context,
                     "conversation_id": cid,
                     "conversation_history_text": history_text,
+                    "memory_context": context['memory_context'],
                 }
                 result: AgentResult = run_handler(handler, body.command, db, agent_name, agent_meta, cid)
                 full_text = result.output
@@ -628,4 +609,31 @@ async def dispatch_command_stream(body: DispatchRequest):
         finally:
             db.close()
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    def authorized_events():
+        from orchestrator_core.core.identity import principal
+        token = request.cookies.get('orchestrator_session')
+        def allowed():
+            if not token:
+                return True
+            check = get_db()
+            try:
+                user = principal(check, token)
+                return user is not None and user['role'] != 'viewer'
+            finally:
+                check.close()
+        stream = event_stream()
+        try:
+            while True:
+                if not allowed():
+                    yield 'event: session.expired\ndata: {}\n\n'
+                    return
+                chunk = next(stream, None)
+                if chunk is None:
+                    return
+                if not allowed():
+                    yield 'event: session.expired\ndata: {}\n\n'
+                    return
+                yield chunk
+        finally:
+            stream.close()
+    return StreamingResponse(authorized_events(), media_type="text/event-stream")

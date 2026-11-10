@@ -47,7 +47,7 @@ def check_guards(
 
     today_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     cost_row = db.execute(
-        "SELECT COALESCE(SUM(cost_usd), 0.0) FROM jobs WHERE date(created_at) = ?",
+        "SELECT COALESCE(SUM(COALESCE(cost_usd,reserved_cost)), 0.0) FROM provider_usage WHERE substr(used_at,1,10) = ?",
         (today_utc,),
     ).fetchone()
     total_cost_today = float(cost_row[0]) if cost_row else 0.0

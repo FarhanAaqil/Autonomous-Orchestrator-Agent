@@ -25,12 +25,18 @@ dashboard/
 utils/
 
 # Planning docs & contracts
+archive/
+frontend/dist/
+toji-shell/
 New plan/
 docs/
 BASELINE.md
 
 # Eval harness & results
-eval/
+eval/results/
+eval/index.json
+**/node_modules/
+**/.env*
 
 # Tests & caches
 tests/
@@ -39,6 +45,8 @@ tests/
 htmlcov/
 
 # Local databases & WAL files
+backups/
+*.dump.enc
 *.db
 *.db-journal
 *.db-wal

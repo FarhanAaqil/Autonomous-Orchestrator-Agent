@@ -29,6 +29,8 @@ from orchestrator_core.models import (
     canonical_agent_name,
 )
 from orchestrator_core.storage.db import log_audit
+from orchestrator_core.storage.transactions import transaction
+from orchestrator_core.jobs.leases import current_lease, require_lease, expires
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +72,9 @@ class JobService:
         created_at = datetime.now(timezone.utc).isoformat()
         not_before_str = not_before.isoformat() if not_before else None
 
-        with db:
+        with transaction(db):
+            if current_lease.get():
+                require_lease(db)
             db.execute(
                 """
                 INSERT INTO jobs (
@@ -97,6 +101,10 @@ class JobService:
                     created_at,
                 ),
             )
+
+            if parent_job_id:
+                from orchestrator_core.jobs.dependencies import attach
+                attach(db, parent_job_id, 'child', job_id)
 
         log_audit(
             db,
@@ -160,13 +168,13 @@ class JobService:
         return [JobRecord(**dict(r)) for r in rows], total
 
     @staticmethod
-    def claim_job(worker_id: str, db: sqlite3.Connection) -> Optional[JobRecord]:
+    def claim_job(worker_id: str, db: sqlite3.Connection, job_id: Optional[str] = None) -> Optional[JobRecord]:
         """
         Atomic Compare-And-Set claim of the next available queued job (Section 5.4).
         Selects highest priority / oldest queued job ready to run.
         """
         now = datetime.now(timezone.utc).isoformat()
-        with db:
+        with transaction(db):
             cur = db.execute(
                 """
                 UPDATE jobs
@@ -174,17 +182,20 @@ class JobService:
                     claimed_by = ?,
                     claimed_at = ?,
                     heartbeat_at = ?,
+                    lease_generation = lease_generation + 1,
+                    lease_expires_at = ?,
                     attempts = attempts + 1,
                     started_at = COALESCE(started_at, ?)
                 WHERE id = (
                     SELECT id FROM jobs
                     WHERE status = 'queued' AND (not_before IS NULL OR not_before <= ?)
+                      AND (CAST(? AS TEXT) IS NULL OR id = ?)
                     ORDER BY priority ASC, created_at ASC
                     LIMIT 1
                 ) AND status = 'queued'
                 RETURNING *;
                 """,
-                (worker_id, now, now, now, now),
+                (worker_id, now, now, expires(), now, now, job_id, job_id),
             )
             row = cur.fetchone()
 
@@ -205,20 +216,22 @@ class JobService:
         return job
 
     @staticmethod
-    def heartbeat(job_id: str, worker_id: str, db: sqlite3.Connection) -> bool:
+    def heartbeat(job_id: str, worker_id: str, db: sqlite3.Connection, generation: Optional[int] = None) -> bool:
         """
         Update heartbeat timestamp for an active running job.
         Returns False if the job was cancelled or claimed by another worker.
         """
         now = datetime.now(timezone.utc).isoformat()
-        with db:
+        lease = current_lease.get()
+        generation = generation if generation is not None else (lease[2] if lease and lease[:2] == (job_id, worker_id) else -1)
+        with transaction(db):
             cur = db.execute(
                 """
                 UPDATE jobs
-                SET heartbeat_at = ?
-                WHERE id = ? AND claimed_by = ? AND status = 'running'
+                SET heartbeat_at = ?, lease_expires_at = ?
+                WHERE id = ? AND claimed_by = ? AND status = 'running' AND lease_generation=? AND lease_expires_at>?
                 """,
-                (now, job_id, worker_id),
+                (now, expires(), job_id, worker_id, generation, now),
             )
         return cur.rowcount > 0
 
@@ -254,8 +267,12 @@ class JobService:
             else (str(new_heartbeat) if new_heartbeat is not None else None)
         )
 
-        with db:
-            db.execute(
+        with transaction(db):
+            if current_lease.get():
+                require_lease(db, job_id)
+            elif job.status == 'running' and target_status != 'cancelled':
+                raise JobClaimConflictError(job_id)
+            cur = db.execute(
                 """
                 UPDATE jobs
                 SET status = ?,
@@ -265,7 +282,7 @@ class JobService:
                     claimed_by = ?,
                     heartbeat_at = ?,
                     finished_at = COALESCE(?, finished_at)
-                WHERE id = ?
+                WHERE id = ? AND status = ? AND lease_generation = ?
                 """,
                 (
                     target_status,
@@ -276,8 +293,12 @@ class JobService:
                     new_heartbeat_str,
                     finished_at,
                     job_id,
+                    job.status,
+                    job.lease_generation,
                 ),
             )
+            if cur.rowcount != 1:
+                raise JobClaimConflictError(job_id)
 
         log_audit(
             db,
@@ -322,7 +343,18 @@ class JobService:
         delta_tokens = (tokens_in or 0) + (tokens_out or 0)
         delta_cost = cost_usd or 0.0
 
-        with db:
+        with transaction(db):
+            job = JobService.get_job(job_id, db)
+            if job is None:
+                raise JobNotFoundError(job_id)
+            if job.status == 'running' or current_lease.get():
+                require_lease(db, job_id)
+            if job.step_count >= job.max_steps:
+                from orchestrator_core.exceptions import MaxStepsExceededError
+                raise MaxStepsExceededError(job_id, job.step_count, job.max_steps)
+            if job.tokens_used + delta_tokens > job.token_budget:
+                from orchestrator_core.exceptions import TokenBudgetExceededError
+                raise TokenBudgetExceededError(job_id, job.tokens_used + delta_tokens, job.token_budget)
             db.execute(
                 """
                 INSERT INTO job_steps (

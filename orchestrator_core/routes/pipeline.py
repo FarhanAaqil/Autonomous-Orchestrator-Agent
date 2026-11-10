@@ -25,12 +25,13 @@ SUPPORTED_PIPELINES = ["apply", "publish", "research"]
 
 class PipelineStarted(BaseModel):
     run_id: str
+    job_id: str
     pipeline_name: str
     status: str = "running"
 
 
-@router.post("/{pipeline_name}", response_model=PipelineStarted)
-async def start_pipeline(
+@router.post("/{pipeline_name}", response_model=PipelineStarted, status_code=202)
+def start_pipeline(
     pipeline_name: str,
     body: PipelineRequest,
     db: sqlite3.Connection = Depends(get_db_connection),
@@ -47,5 +48,6 @@ async def start_pipeline(
             detail=f"Unknown pipeline '{pipeline_name}'. Supported: {SUPPORTED_PIPELINES}",
         )
 
-    run_id = run_pipeline(pipeline_name, body, db)
-    return PipelineStarted(run_id=run_id, pipeline_name=pipeline_name, status="completed")
+    from orchestrator_core.jobs.background import enqueue
+    job_id = enqueue(db, 'pipeline', {'name': pipeline_name, 'command': body.command})
+    return PipelineStarted(run_id=job_id, job_id=job_id, pipeline_name=pipeline_name, status='queued')

@@ -189,6 +189,9 @@ def atomic_decision(fn):
             raise RuntimeError("Approval decisions require a clean transaction boundary.")
         db.execute("BEGIN IMMEDIATE")
         try:
+            from orchestrator_core.jobs.leases import current_lease, require_lease
+            if current_lease.get():
+                require_lease(db)
             result = fn(*args, **kwargs)
             db.commit()
             return result
@@ -283,6 +286,12 @@ def request_approval(
             "risk": policy["risk"],
         },
     )
+
+    from orchestrator_core.jobs.leases import current_lease
+    from orchestrator_core.jobs.dependencies import attach
+    lease = current_lease.get()
+    if lease:
+        attach(db, lease[0], 'approval', approval_id)
 
     logger.info(
         "Approval queued — id=%s action_type=%s target=%s expires_at=%s hash=%s",

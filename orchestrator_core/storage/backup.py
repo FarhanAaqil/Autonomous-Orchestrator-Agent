@@ -15,6 +15,9 @@ import os
 import shutil
 import sqlite3
 import tarfile
+import tempfile
+import uuid
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -109,6 +112,8 @@ def restore_sqlite(
     settings = get_settings()
     target = Path(target_path or settings.database_path)
     target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        backup_sqlite(target, target.with_name(target.name + '.rollback-' + uuid.uuid4().hex))
 
     backup_conn = sqlite3.connect(str(backup))
     target_conn = sqlite3.connect(str(target))
@@ -129,9 +134,9 @@ def backup_chroma(
     """
     Create a compressed tar snapshot of the ChromaDB directory.
     """
-    src = Path(source_dir or "chroma_db")
+    src = Path(source_dir or get_settings().chroma_db_dir)
     if not src.exists():
-        src.mkdir(parents=True, exist_ok=True)
+        raise FileNotFoundError(f'Vector source does not exist: {src}')
 
     if dest_tar_path is None:
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -161,16 +166,27 @@ def restore_chroma(
     if not archive.exists():
         raise FileNotFoundError(f"Chroma archive not found: {archive}")
 
-    target = Path(target_dir or "chroma_db")
-    if target.exists():
-        shutil.rmtree(target)
-    target.mkdir(parents=True, exist_ok=True)
-
-    with tarfile.open(archive, "r:gz") as tar:
+    target = Path(target_dir or get_settings().chroma_db_dir).resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='vector-restore-', dir=target.parent) as stage:
+        staged = Path(stage) / 'data'
+        staged.mkdir()
+        with tarfile.open(archive, 'r:gz') as tar:
+            members = tar.getmembers()
+            if any(m.issym() or m.islnk() or not (m.isfile() or m.isdir()) for m in members):
+                raise ValueError('Archive links and special files are not allowed')
+            if sum(m.size for m in members) > 1024**3:
+                raise ValueError('Vector archive exceeds restore size limit')
+            tar.extractall(path=staged, filter='data')
+        rollback = target.with_name(target.name + '.rollback-' + uuid.uuid4().hex)
+        if target.exists():
+            target.rename(rollback)
         try:
-            tar.extractall(path=target, filter="data")
-        except TypeError:
-            tar.extractall(path=target)
+            staged.rename(target)
+        except BaseException:
+            if rollback.exists():
+                rollback.rename(target)
+            raise
 
     logger.info("ChromaDB restored from %s to %s", archive, target)
     return target.resolve()
@@ -181,9 +197,16 @@ def create_full_system_snapshot(output_dir: Optional[str | Path] = None) -> dict
     Create a coordinated snapshot of both SQLite DB and ChromaDB vectors
     with metadata manifest.
     """
+    started = time.monotonic()
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     base_dir = Path(output_dir or f"backups/snapshot_{timestamp}")
     base_dir.mkdir(parents=True, exist_ok=True)
+
+    if get_settings().database_url:
+        from orchestrator_core.storage.postgres_backup import backup
+        result = backup(os.environ.get('MIGRATION_DATABASE_URL') or get_settings().database_url,
+                        base_dir / 'postgres.dump.enc', os.environ['BACKUP_ENCRYPTION_KEY'])
+        return {'snapshot_dir': str(base_dir.resolve()), 'manifest': result}
 
     sqlite_backup = backup_sqlite(dest_path=base_dir / "aaqil.db")
     chroma_backup = backup_chroma(dest_tar_path=base_dir / "chroma.tar.gz")
@@ -204,8 +227,7 @@ def create_full_system_snapshot(output_dir: Optional[str | Path] = None) -> dict
             "size_bytes": chroma_backup.stat().st_size,
         },
         "version": "1.0.0",
-        "rpo": "1h",
-        "rto": "<30s",
+        "backup_seconds": time.monotonic() - started,
     }
 
     manifest_path = base_dir / "manifest.json"

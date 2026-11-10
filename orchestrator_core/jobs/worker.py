@@ -40,7 +40,7 @@ class Worker:
         tool_registry: Optional[dict[str, Callable[..., Any]]] = None,
     ) -> None:
         self.worker_id = worker_id or f"worker-{uuid.uuid4().hex[:8]}"
-        self.db_path = db_path or get_settings().database_path
+        self.db_path = db_path
         self.poll_interval = poll_interval
         self.zombie_timeout = zombie_timeout
         self.llm_client = llm_client
@@ -71,6 +71,8 @@ class Worker:
 
             # 2. Reap zombies
             reaped = reap_zombies(db, timeout_seconds=self.zombie_timeout)
+            from orchestrator_core.jobs.dependencies import reconcile
+            reconcile(db)
             if reaped:
                 logger.info("Worker %s: reaped %d zombie jobs", self.worker_id, len(reaped))
 
@@ -81,15 +83,31 @@ class Worker:
 
             # 4. Execute claimed job
             from orchestrator_core.runner.loop import run_job
+            if job.work_kind != 'agent':
+                from orchestrator_core.jobs.background import run_background_job
+                run_job = run_background_job
 
             logger.info("Worker %s executing claimed job %s (agent=%s)", self.worker_id, job.id, job.agent)
-            run_job(
-                job=job,
-                db=db,
-                llm_client=self.llm_client,
-                worker_id=self.worker_id,
-                tool_registry=self.tool_registry,
-            )
+            renewal_stop = threading.Event()
+            def renew():
+                # A distinct connection keeps leases alive during provider calls.
+                while not renewal_stop.wait(15):
+                    heartbeat_db = get_db(self.db_path)
+                    try:
+                        if not JobService.heartbeat(job.id, self.worker_id, heartbeat_db, job.lease_generation):
+                            return
+                    finally:
+                        heartbeat_db.close()
+            renewer = threading.Thread(target=renew, daemon=True)
+            if own_db:
+                renewer.start()
+            try:
+                run_job(job=job, db=db, llm_client=self.llm_client,
+                        worker_id=self.worker_id, tool_registry=self.tool_registry)
+            finally:
+                renewal_stop.set()
+                if own_db:
+                    renewer.join(timeout=6)
             return True
         finally:
             if own_db:
