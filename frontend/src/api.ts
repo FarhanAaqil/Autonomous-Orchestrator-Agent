@@ -28,6 +28,7 @@ export async function request<T>(path: string, method = 'GET', body?: unknown, s
     headers: { ...(body === undefined ? {} : {'Content-Type': 'application/json'}), ...(method === 'GET' ? {} : {'X-CSRF-Token': csrf}) },
     body: body === undefined ? undefined : JSON.stringify(body)});
   const data = await response.json().catch(() => ({detail: 'The server returned an unreadable response.'}));
+  if (path === '/ready' && response.status === 503) return data as T;
   if (!response.ok) { if (response.status === 401 && path !== '/auth/login') expired(); throw new ApiError(response.status, data); }
   return data as T;
 }

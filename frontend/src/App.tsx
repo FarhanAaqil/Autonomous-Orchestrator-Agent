@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { motion, MotionConfig } from 'motion/react';
+import { motion, MotionConfig, useReducedMotion } from 'motion/react';
 import { ArrowUpRight, Boxes, CalendarDays, CheckCheck, CircleHelp, FlaskConical, LayoutDashboard, LogOut, MessageSquare, Settings2, Sprout, Workflow } from 'lucide-react';
 import { request, setSession, subscribe } from './api';
 import type { Session } from './api';
@@ -11,6 +11,7 @@ const navigation = [
   ['Pipelines', Workflow], ['Evaluation', FlaskConical], ['Settings', Settings2],
 ] as const;
 export default function App() {
+  const reduceMotion = useReducedMotion();
   const [session, updateSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true); const [error, setError] = useState('');
   const [tab, setTab] = useState('Overview'); const [status, setStatus] = useState('Connecting'); const [tick, setTick] = useState(0);
@@ -38,7 +39,7 @@ export default function App() {
     catch {setError('Could not sign out. Please retry while connected.');}
   }
   const [signingIn, setSigningIn] = useState(false);
-  if (loading) return <div className="center"><span role="status">Opening your workspace?</span></div>;
+  if (loading) return <div className="center"><span role="status">Opening your workspace...</span></div>;
   if (!session) return <div className="login-shell">
     <section className="login-story"><div className="brand"><span className="brand-mark">t.</span> toji<span className="small">WORKSPACE</span></div>
       <p className="eyebrow">A little structure. More possibility.</p><h1>Make room<br/>for your<br/><em>next idea.</em></h1>
@@ -55,7 +56,7 @@ export default function App() {
       }}>
         <label>Username<input name="username" autoComplete="username" required autoFocus maxLength={100}/></label>
         <label>Password<input name="password" type="password" autoComplete="current-password" required maxLength={1024}/></label>
-        <button className="primary" disabled={signingIn}>{signingIn ? 'Signing in?' : 'Enter workspace'}<ArrowUpRight size={18}/></button>
+        <button className="primary" disabled={signingIn}>{signingIn ? 'Signing in...' : 'Enter workspace'}<ArrowUpRight size={18}/></button>
       </form><p className="small"><CircleHelp size={14}/> Accounts are managed by your workspace administrator.</p>
     </section>
   </div>;
@@ -67,7 +68,7 @@ export default function App() {
       <p className="nav-label">YOUR WORKSPACE</p><nav aria-label="Main navigation">{navigation.map(([name, Icon]) => <button key={name} onClick={() => navigate(name)} aria-current={tab === name ? 'page' : undefined}><Icon size={18}/>{name}</button>)}</nav>
       <div className="sidebar-bottom"><div className="connection"><span className={status === 'Live' ? 'live-dot' : 'wait-dot'}/>{status} updates</div><div className="account"><span className="avatar">{session.user.username.slice(0, 1).toUpperCase()}</span><div>{session.user.username}<small>{session.user.role}</small></div><button title="Sign out" aria-label="Sign out" onClick={logout}><LogOut size={17}/></button></div></div>
     </aside><div className="workspace-body"><header className="topbar"><span>Workspace <span className="muted">/ {tab}</span></span><span className="small">YOUR IDEAS. YOUR DIRECTION.</span></header>
-      <main id="workspace" ref={main}><Banner error={error}/><motion.div key={tab} initial={{opacity: 0, y: 6}} animate={{opacity: 1, y: 0}} transition={{duration: .18}}>{content}</motion.div></main>
+      <main id="workspace" ref={main}><Banner error={error}/><motion.div key={tab} initial={reduceMotion ? false : {opacity: 0, y: 6}} animate={{opacity: 1, y: 0}} transition={{duration: .18}}>{content}</motion.div></main>
       <footer>Toji ? A considered space for autonomous work.<span>Human approval stays at the center.</span></footer>
     </div></div></MotionConfig>;
 }

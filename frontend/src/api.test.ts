@@ -2,6 +2,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, dispatch, parseEvent, request, setSession } from './api';
 afterEach(() => vi.unstubAllGlobals());
 describe('browser transport', () => {
+  it('retains individual readiness failures for diagnostics', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"database":true,"worker":false}', {status:503})));
+    expect(await request('/ready')).toEqual({database:true,worker:false});
+  });
   it('keeps CSRF in a header and uses same-origin cookies', async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response('{}'));
     vi.stubGlobal('fetch', fetcher);

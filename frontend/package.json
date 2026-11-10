@@ -9,7 +9,7 @@
     "lint": "oxlint src --deny-warnings",
     "preview": "vite preview",
     "typecheck": "tsc -b",
-    "test": "vitest run",
+    "test": "vitest run src",
     "test:browser": "playwright test",
     "contract": "openapi-typescript openapi.json -o src/generated.ts"
   },

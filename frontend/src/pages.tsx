@@ -19,8 +19,8 @@ export function Overview({user, tick, navigate}: Props) {
   useEffect(() => {const media = matchMedia('(prefers-reduced-motion: reduce)'); const change = () => setCalm(media.matches); media.addEventListener('change', change); return () => media.removeEventListener('change', change);}, []);
   return <><PageHead eyebrow="A FRESH PERSPECTIVE" title={'Hello, ' + user.username + '.'}><button onClick={() => navigate('Chat')} className="primary">Start a conversation <Plus size={17}/></button></PageHead>
     <Banner error={jobs.error || approvals.error || agents.error || flags.error}/>
-    <section className="welcome-panel"><div><span className="eyebrow">SPACE TO THINK. TOOLS TO DO.</span><h2>Good work starts<br/>with a little <em>direction.</em></h2><p>Give your agents an idea. Follow their progress.<br/>Make the decisions that matter.</p><button onClick={() => navigate('Jobs')}>Explore your work <ArrowUpRight size={17}/></button></div><div className="orbit-art" aria-hidden="true"><div className="orbit outer"/><div className="orbit inner"/><span className="orbit-center">t.</span><i className="satellite s1">?</i><i className="satellite s2">?</i><i className="satellite s3">?</i></div></section>
-    <div className="stats"><button onClick={() => navigate('Jobs')}><span>Work in your queue</span><strong>{jobs.loading ? '?' : jobs.data.total}</strong><small>All saved jobs <ArrowUpRight size={15}/></small></button><button onClick={() => navigate('Approvals')}><span>Waiting for your review</span><strong>{approvals.loading ? '?' : approvals.data.total}</strong><small>Your approval matters <ArrowUpRight size={15}/></small></button><button onClick={() => navigate('Settings')}><span>Workspace status</span><strong className="word">{paused ? 'Paused' : flags.loading ? 'Checking' : 'Active'}</strong><small>{paused ? 'Automation is on hold' : 'Review controls in settings'} <ArrowUpRight size={15}/></small></button></div>
+    <section className="welcome-panel"><div><span className="eyebrow">SPACE TO THINK. TOOLS TO DO.</span><h2>Good work starts<br/>with a little <em>direction.</em></h2><p>Give your agents an idea. Follow their progress.<br/>Make the decisions that matter.</p><button onClick={() => navigate('Jobs')}>Explore your work <ArrowUpRight size={17}/></button></div><div className="orbit-art" aria-hidden="true"><div className="orbit outer"/><div className="orbit inner"/><span className="orbit-center">t.</span><i className="satellite s1">&#10022;</i><i className="satellite s2">&#8599;</i><i className="satellite s3">&#9678;</i></div></section>
+    <div className="stats"><button onClick={() => navigate('Jobs')}><span>Work in your queue</span><strong>{jobs.loading ? '-' : jobs.data.total}</strong><small>All saved jobs <ArrowUpRight size={15}/></small></button><button onClick={() => navigate('Approvals')}><span>Waiting for your review</span><strong>{approvals.loading ? '-' : approvals.data.total}</strong><small>Your approval matters <ArrowUpRight size={15}/></small></button><button onClick={() => navigate('Settings')}><span>Workspace status</span><strong className="word">{paused ? 'Paused' : flags.loading ? 'Checking' : 'Active'}</strong><small>{paused ? 'Automation is on hold' : 'Review controls in settings'} <ArrowUpRight size={15}/></small></button></div>
     <div className="section-title"><div><p className="eyebrow">A SMALL TEAM. MANY POSSIBILITIES.</p><h2>Your agent studio</h2></div><button disabled={calm} aria-pressed={graph} onClick={() => setGraph(!graph)}><Layers3 size={16}/>{graph ? 'Close 3D view' : 'Explore in 3D'}</button></div>
     {calm && <p className="small">Reduced motion is enabled. The complete agent list is available below.</p>}
     {graph && !calm && <Suspense fallback={<p role="status">Opening the optional 3D view?</p>}><Graph agents={agents.data}/></Suspense>}
@@ -35,10 +35,11 @@ export function Chat({user}: Props) {
   const [cid, setCid] = useState<string | null>(null); const [messages, setMessages] = useState<Message[]>([]);
   const [command, setCommand] = useState(''); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   const [answer, setAnswer] = useState(''); const [clarification, setClarification] = useState('');
+  const [olderBusy, setOlderBusy] = useState(false); const [historyComplete, setHistoryComplete] = useState(false);
   const controller = useRef<AbortController | null>(null); const end = useRef<HTMLDivElement>(null);
   useEffect(() => () => controller.current?.abort(), []);
   async function load(id: string) {
-    controller.current?.abort(); setCid(id); setError(''); setAnswer(''); setClarification('');
+    controller.current?.abort(); setCid(id); setError(''); setAnswer(''); setClarification(''); setHistoryComplete(false);
     try {setMessages(await request<Message[]>('/conversations/' + id + '/messages?limit=500'));}
     catch (e) {setError((e as Error).message);}
   }
@@ -60,10 +61,19 @@ export function Chat({user}: Props) {
       setBusy(false); conversations.reload();
     }
   }
+  async function older() {
+    if (!cid) return;
+    setOlderBusy(true);
+    try {
+      const records = await request<Message[]>('/conversations/' + cid + '/messages?limit=500&offset=' + messages.length);
+      setMessages(previous => [...records, ...previous]); setHistoryComplete(records.length < 500);
+    } catch (e) {setError((e as Error).message);}
+    finally {setOlderBusy(false);}
+  }
   return <><PageHead eyebrow="THINK OUT LOUD" title="A conversation, then a plan."><button disabled={busy} onClick={() => {setCid(null); setMessages([]); setAnswer(''); setError('');}}><Plus size={16}/>New conversation</button></PageHead>
     <div className="chat-layout"><aside className="panel conversation-list"><h3>Your conversations</h3><Banner error={conversations.error}/>{conversations.data.map(c => <button disabled={busy} aria-current={cid === c.id ? 'page' : undefined} onClick={() => load(c.id)} key={c.id}>{c.title}<small>{c.message_count} messages</small></button>)}{!conversations.data.length && <p className="muted">Your first conversation is a blank canvas.</p>}</aside>
     <section className="panel chat-panel"><Banner error={error} notice={clarification}/><div className="transcript" aria-label="Conversation messages">{!messages.length && <Empty>What would you like to move forward today?</Empty>}{messages.map(m => <article className={'message ' + m.role} key={m.id}><span className="eyebrow">{m.role === 'user' ? 'YOU' : m.agent || 'TOJI'}</span><p>{m.content}</p></article>)}{answer && <article className="message assistant"><span className="eyebrow">TOJI</span><p>{answer}</p></article>}<div ref={end}/></div>
-      <div className="chat-tools"><button onClick={() => end.current?.scrollIntoView({behavior: 'auto', block: 'nearest'})}>Jump to latest</button>{cid && <button disabled={busy} onClick={() => load(cid)}><RefreshCw size={14}/>Refresh saved messages</button>}</div>
-      {user.role !== 'viewer' ? <form className="composer" onSubmit={e => {e.preventDefault(); void send();}}><label htmlFor="command" className="sr-only">Your message</label><textarea id="command" value={command} onChange={e => setCommand(e.target.value)} placeholder="Give your next idea a place to begin?" rows={3} required disabled={busy}/><div><span className="small" role="status">{busy ? 'Working on your request?' : 'Actions that need consent will appear in Approvals.'}</span>{busy ? <button type="button" onClick={() => controller.current?.abort()}><Square size={15}/>Stop waiting</button> : <button className="primary" disabled={!command.trim()}><Send size={16}/>Send</button>}</div></form> : <p className="banner">Viewer access: you can read saved conversations.</p>}
+      <div className="chat-tools">{cid && messages.length >= 500 && !historyComplete && <button disabled={busy || olderBusy} onClick={older}>Load older messages</button>}<button onClick={() => end.current?.scrollIntoView({behavior: 'auto', block: 'nearest'})}>Jump to latest</button>{cid && <button disabled={busy || olderBusy} onClick={() => load(cid)}><RefreshCw size={14}/>Refresh saved messages</button>}</div>
+      {user.role !== 'viewer' ? <form className="composer" onSubmit={e => {e.preventDefault(); void send();}}><label htmlFor="command" className="sr-only">Your message</label><textarea id="command" value={command} onChange={e => setCommand(e.target.value)} placeholder="Give your next idea a place to begin..." rows={3} required disabled={busy}/><div><span className="small" role="status">{busy ? 'Working on your request...' : 'Actions that need consent will appear in Approvals.'}</span>{busy ? <button type="button" onClick={() => controller.current?.abort()}><Square size={15}/>Stop waiting</button> : <button className="primary" disabled={!command.trim()}><Send size={16}/>Send</button>}</div></form> : <p className="banner">Viewer access: you can read saved conversations.</p>}
     </section></div></>;
 }
