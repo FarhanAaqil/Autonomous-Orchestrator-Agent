@@ -1,0 +1,154 @@
+import { test, expect } from '@playwright/test';
+import type { Page } from '@playwright/test';
+
+test('memory review, queued workflows and long history remain usable', async ({page}) => {
+  await login(page);
+  await page.getByRole('button',{name:'Chat',exact:true}).click();
+  await page.getByRole('button',{name:/Long history fixture/}).click();
+  await expect(page.getByText('history-message-519',{exact:true})).toBeVisible();
+  await expect(page.getByText('history-message-0',{exact:true})).toHaveCount(0);
+  await page.getByRole('button',{name:'Load older messages'}).click();
+  await expect(page.getByText('history-message-0',{exact:true})).toBeAttached();
+  await page.getByRole('button',{name:'Memory',exact:true}).click();
+  await page.getByText('Capture a memory',{exact:true}).click();
+  await page.getByLabel('Label',{exact:true}).fill('Browser memory');
+  await page.getByLabel('Memory',{exact:true}).fill('Prefer warm oat and clay surfaces.');
+  await page.getByRole('button',{name:'Save for review'}).click();
+  await expect(page.getByRole('heading',{name:'Browser memory'})).toBeVisible();
+  await page.getByRole('button',{name:'Confirm reviewed memory'}).click();
+  await expect(page.getByText('reviewed',{exact:true})).toBeVisible();
+  const stored = await (await page.request.get('/memory')).json();
+  expect(stored.find((m: {key:string}) => m.key === 'Browser memory').pending_review).toBe(false);
+  const token = await csrf(page);
+  await page.request.post('/system/kill-switch',{headers:{'X-CSRF-Token':token},data:{on:false}});
+  await page.getByRole('button',{name:'Pipelines',exact:true}).click();
+  await page.getByLabel('Your brief').first().fill('Browser pipeline fixture');
+  await page.getByRole('button',{name:'Queue workflow'}).first().click();
+  await expect(page.getByRole('heading',{name:'Job detail'})).toBeVisible();
+  const jobs = await (await page.request.get('/jobs')).json();
+  expect(jobs.items.some((j: {work_kind:string}) => j.work_kind === 'pipeline')).toBe(true);
+  await page.request.post('/system/kill-switch',{headers:{'X-CSRF-Token':token},data:{on:true}});
+});
+test('WebGL absence preserves the agent list and keyboard navigation', async ({page}) => {
+  await page.addInitScript(() => {
+    const getContext = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function(kind: string, ...args: unknown[]) {
+      if (kind.includes('webgl')) return null;
+      return Reflect.apply(getContext, this, [kind,...args]);
+    } as typeof getContext;
+  });
+  await login(page);
+  await page.getByRole('button',{name:'Explore in 3D'}).click();
+  await expect(page.getByText(/3D is unavailable|WebGL is unavailable/)).toBeVisible();
+  await expect(page.getByText('Email Agent',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Close 3D view'}).click();
+  await page.getByRole('button',{name:'Settings',exact:true}).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading',{name:'Stay in control.'})).toBeFocused();
+  await expect(page.getByRole('heading',{name:'Workspace accounts'})).toBeVisible();
+});
+async function login(page: Page, username = 'browser-admin') {
+  await page.goto('/');
+  await page.getByLabel('Username', {exact:true}).fill(username);
+  await page.getByLabel('Password', {exact:true}).fill('browser-fixture-password-123');
+  await page.getByRole('button', {name:'Enter workspace'}).click();
+  await expect(page.getByRole('heading', {name:'Hello, ' + username + '.'})).toBeVisible();
+}
+async function csrf(page: Page) {return (await (await page.request.get('/auth/session')).json()).csrf_token as string;}
+test('compiled workspace works without CDNs and keeps 3D optional', async ({page}) => {
+  const external: string[] = []; const graph: string[] = [];
+  page.on('request', r => {if (r.url().includes('/assets/Graph-')) graph.push(r.url());});
+  await page.route('**/*', route => {const url = new URL(route.request().url()); if (url.hostname !== '127.0.0.1') {external.push(url.hostname); return route.abort();} return route.continue();});
+  await page.setViewportSize({width:1440,height:1100});
+  await login(page);
+  await expect(page.getByRole('heading', {name:'Your agent studio'})).toBeVisible();
+  await expect(page.getByText('Email Agent', {exact:true})).toBeVisible();
+  expect(graph).toHaveLength(0); expect(external).toHaveLength(0);
+  await page.screenshot({path:'test-results/workspace-desktop.png', fullPage:true});
+  await page.getByRole('button',{name:'Explore in 3D'}).click();
+  await expect(page.getByRole('img',{name:/Agent constellation/})).toBeVisible();
+  await expect.poll(() => graph.length).toBeGreaterThan(0);
+  await page.getByRole('button',{name:'Close 3D view'}).click();
+  await expect(page.locator('canvas')).toHaveCount(0);
+  for (const path of ['/static/package.json','/static/src/App.tsx','/assets/../package.json']) expect((await page.request.get(path)).status()).toBe(404);
+  await page.getByRole('button',{name:'Sign out'}).click();
+  await expect(page.getByRole('heading',{name:'Welcome back.'})).toBeVisible();
+  expect((await page.request.get('/jobs')).status()).toBe(401);
+});
+test('review binds the exact hash and shows a simulated outcome', async ({page}) => {
+  await login(page);
+  const token = await csrf(page);
+  const records = await (await page.request.get('/approvals?status=pending')).json();
+  const approval = records.items[0];
+  await page.getByRole('button',{name:'Approvals',exact:true}).click();
+  await page.getByRole('button',{name:'send email',exact:true}).first().click();
+  await expect(page.getByText('Browser review fixture',{exact:false}).first()).toBeVisible();
+  await expect(page.getByRole('button',{name:'Approve reviewed content'})).toBeDisabled();
+  const stale = await page.request.post('/approvals/' + approval.id + '/approve', {headers:{'X-CSRF-Token':token},data:{expected_hash:'0'.repeat(64),session_id:null}});
+  expect(stale.status()).toBe(409);
+  await page.getByLabel('I reviewed this exact content, destination, and mode.').check();
+  await page.getByRole('button',{name:'Approve reviewed content'}).click();
+  await expect(page.getByRole('button',{name:'Execute approved action'})).toBeVisible();
+  // Keep live work paused in this fixture. Briefly enable simulation execution.
+  await page.request.post('/system/kill-switch',{headers:{'X-CSRF-Token':token},data:{on:false}});
+  await page.getByRole('button',{name:'Execute approved action'}).click();
+  await expect(page.locator('.review .pill')).toHaveText('simulated');
+  const stored = await (await page.request.get('/approvals/' + approval.id)).json();
+  expect(stored.status).toBe('simulated');
+  expect(stored.approved_hash).toBe(stored.payload_hash);
+  await page.request.post('/system/kill-switch',{headers:{'X-CSRF-Token':token},data:{on:true}});
+});
+test('mobile viewer has usable navigation and no mutation controls', async ({page}) => {
+  await page.setViewportSize({width:390,height:844}); await page.emulateMedia({reducedMotion:'reduce'});
+  await login(page,'browser-viewer');
+  await expect(page.getByRole('button',{name:'Explore in 3D'})).toBeDisabled();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole('button',{name:'Chat',exact:true}).click();
+  await expect(page.getByText('Viewer access: you can read saved conversations.')).toBeVisible();
+  await expect(page.getByRole('button',{name:'Send',exact:true})).toHaveCount(0);
+  await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await expect(page.getByText('Only administrators can change automation and budget settings.')).toBeVisible();
+  expect((await page.request.get('/auth/users')).status()).toBe(403);
+  expect((await page.request.post('/jobs',{headers:{'X-CSRF-Token':await csrf(page)},data:{agent:'general_chat_agent',goal:'Denied'}})).status()).toBe(403);
+  await page.screenshot({path:'test-results/workspace-mobile.png',fullPage:true});
+});
+test('saved chat, schedules and jobs match backend state', async ({page}) => {
+  await login(page);
+  const token = await csrf(page);
+  await page.request.post('/system/kill-switch',{headers:{'X-CSRF-Token':token},data:{on:false}});
+  await page.getByRole('button',{name:'Chat',exact:true}).click();
+  await page.getByLabel('Your message').fill('system status');
+  await page.getByRole('button',{name:'Send',exact:true}).click();
+  await expect(page.locator('.message.assistant')).toBeVisible();
+  const conversations = await (await page.request.get('/conversations')).json();
+  expect(conversations[0].message_count).toBeGreaterThanOrEqual(2);
+  await page.request.post('/system/kill-switch',{headers:{'X-CSRF-Token':token},data:{on:true}});
+  await page.getByRole('button',{name:'Schedules',exact:true}).click();
+  await page.getByText('Create a schedule',{exact:true}).click();
+  await page.getByLabel('Schedule name').fill('Browser routine');
+  await page.getByLabel('Goal',{exact:true}).fill('Offline browser goal');
+  await page.getByRole('button',{name:'Create paused schedule'}).click();
+  await expect(page.getByRole('heading',{name:'Browser routine'})).toBeVisible();
+  const schedules = await (await page.request.get('/schedules')).json();
+  expect(schedules.find((s: {name:string}) => s.name === 'Browser routine').is_active).toBe(false);
+  await page.getByRole('button',{name:'Jobs',exact:true}).click();
+  await page.getByText('Create a job',{exact:true}).click();
+  await page.getByLabel('Goal',{exact:true}).fill('Browser queued work');
+  await page.getByRole('button',{name:'Queue job'}).click();
+  await expect(page.getByRole('alert')).toContainText('Execution is paused');
+  await page.request.post('/system/kill-switch',{headers:{'X-CSRF-Token':token},data:{on:false}});
+  await page.getByRole('button',{name:'Queue job'}).click();
+  await expect(page.getByRole('button',{name:'Browser queued work'})).toBeVisible();
+  await page.getByRole('button',{name:'Browser queued work'}).click();
+  await page.getByRole('button',{name:'Cancel job',exact:true}).click();
+  await expect(page.locator('.detail .pill')).toHaveText('cancelled');
+  expect((await (await page.request.get('/jobs?status=cancelled')).json()).items.some((j: {goal:string}) => j.goal === 'Browser queued work')).toBe(true);
+  await page.request.post('/system/kill-switch',{headers:{'X-CSRF-Token':token},data:{on:true}});
+});
+test('revoked sessions close live events and return to login', async ({page}) => {
+  await login(page,'browser-operator');
+  const token = await csrf(page);
+  await page.request.post('/auth/logout',{headers:{'X-CSRF-Token':token}});
+  await expect(page.getByRole('heading',{name:'Welcome back.'})).toBeVisible({timeout:18000});
+  await expect(page.getByText('Your session ended. Sign in to continue.')).toBeVisible();
+});

@@ -47,6 +47,8 @@ chroma_db/
 *.log
 *.pid
 test-reports/
+frontend/test-results/
+frontend/playwright-report/
 *.test.log
 
 # Runtime cache artifacts

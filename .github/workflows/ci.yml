@@ -86,3 +86,36 @@ jobs:
       - name: Router Eval CI Gate (Frozen Test Split)
         run: |
           python eval/run_eval.py --dry-run --split test --ci-gate --no-save
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build and check the compiled workspace
+        working-directory: frontend
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run contract
+          git diff --exit-code -- src/generated.ts
+          npm run lint
+          npm test
+          npm run build
+          npx playwright install --with-deps chromium
+
+      - name: Verify API contracts and static boundaries
+        run: |
+          python scripts/export_frontend_contract.py --check
+          python scripts/check_frontend_budget.py
+          python scripts/test_local.py tests/test_phase3_boundaries.py
+          node --test toji-shell/endpoint.test.js
+
+      - name: Exercise the compiled browser workflows
+        run: |
+          python scripts/phase3_browser_server.py > /tmp/toji-browser.log 2>&1 &
+          browser_pid=$!
+          trap 'kill "$browser_pid" 2>/dev/null || true' EXIT
+          python -c "import time,urllib.request; exec('for attempt in range(30):\n try:\n  urllib.request.urlopen(\"http://127.0.0.1:8081/health\",timeout=1); break\n except OSError: time.sleep(1)\nelse: raise SystemExit(\"Browser fixture did not start\")')"
+          npm --prefix frontend run test:browser
