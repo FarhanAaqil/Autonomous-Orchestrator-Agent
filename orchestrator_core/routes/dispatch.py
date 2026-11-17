@@ -375,7 +375,7 @@ def dispatch_command(
         with db:
             db.execute(
                 "INSERT INTO messages (id, conversation_id, role, content, agent, created_at) VALUES (?, ?, 'assistant', ?, ?, ?)",
-                (asst_msg_id, cid, op_result.output, op_result.agent, now),
+                (asst_msg_id, cid, op_result.output, op_result.agent, datetime.now(timezone.utc).isoformat()),
             )
             db.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, cid))
         return op_result
@@ -391,7 +391,7 @@ def dispatch_command(
         with db:
             db.execute(
                 "INSERT INTO messages (id, conversation_id, role, content, agent, created_at) VALUES (?, ?, 'assistant', ?, 'router', ?)",
-                (asst_msg_id, cid, clarification_msg, now),
+                (asst_msg_id, cid, clarification_msg, datetime.now(timezone.utc).isoformat()),
             )
             db.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, cid))
         return JSONResponse(
@@ -456,7 +456,7 @@ def dispatch_command(
     with db:
         db.execute(
             "INSERT INTO messages (id, conversation_id, role, content, agent, created_at) VALUES (?, ?, 'assistant', ?, ?, ?)",
-            (asst_msg_id, cid, result.output, agent_name, now),
+            (asst_msg_id, cid, result.output, agent_name, datetime.now(timezone.utc).isoformat()),
         )
         db.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, cid))
 
@@ -518,7 +518,7 @@ def dispatch_command_stream(body: DispatchRequest, request: Request):
                 with db:
                     db.execute(
                         "INSERT INTO messages (id, conversation_id, role, content, agent, created_at) VALUES (?, ?, 'assistant', ?, ?, ?)",
-                        (asst_msg_id, cid, op_result.output, op_result.agent, now),
+                        (asst_msg_id, cid, op_result.output, op_result.agent, datetime.now(timezone.utc).isoformat()),
                     )
                     db.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, cid))
                 yield f"event: done\ndata: {json.dumps({'output': op_result.output, 'agent': op_result.agent, 'action_type': op_result.action_type, 'approval_id': op_result.approval_id, 'latency_ms': latency_ms, 'conversation_id': cid})}\n\n"
@@ -533,7 +533,7 @@ def dispatch_command_stream(body: DispatchRequest, request: Request):
                 with db:
                     db.execute(
                         "INSERT INTO messages (id, conversation_id, role, content, agent, created_at) VALUES (?, ?, 'assistant', ?, 'router', ?)",
-                        (asst_msg_id, cid, clarification_msg, now),
+                        (asst_msg_id, cid, clarification_msg, datetime.now(timezone.utc).isoformat()),
                     )
                     db.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, cid))
                 yield f"event: clarification\ndata: {json.dumps(classification.model_dump())}\n\n"
@@ -597,7 +597,7 @@ def dispatch_command_stream(body: DispatchRequest, request: Request):
             with db:
                 db.execute(
                     "INSERT INTO messages (id, conversation_id, role, content, agent, created_at) VALUES (?, ?, 'assistant', ?, ?, ?)",
-                    (asst_msg_id, cid, full_text, agent_name, now),
+                    (asst_msg_id, cid, full_text, agent_name, datetime.now(timezone.utc).isoformat()),
                 )
                 db.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, cid))
 

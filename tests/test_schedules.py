@@ -91,37 +91,34 @@ def test_schedules_crud_and_run_trigger(client: TestClient):
     assert get_after_del.status_code == 404
 
 
-def test_sse_event_hub_and_last_event_id_replay():
-    # Publish events to event hub
-    event_hub.publish("job.created", {"job_id": "test_job_1", "status": "queued"})
-    event_hub.publish("job.step", {"job_id": "test_job_1", "step": 1, "kind": "tool"})
-    current_counter = event_hub._counter
-    assert current_counter >= 2
-
-    # Verify history contains events with IDs
-    assert len(event_hub._history) >= 2
-    last_item = event_hub._history[-1]
-    assert last_item[0] == current_counter
-    assert f"id: {current_counter}" in last_item[1]
+def test_sse_event_hub_and_last_event_id_replay(tmp_path, monkeypatch):
+    from orchestrator_core.jobs.service import JobService
+    path = str(tmp_path / 'events.db')
+    conn = get_db(path)
+    run_migrations(conn)
+    job = JobService.create_job('research_agent', 'Replay persisted work', conn)
+    cursor = conn.execute('SELECT MAX(id) FROM job_events').fetchone()[0]
+    JobService.cancel_job(job.id, conn)
+    conn.close()
+    monkeypatch.setattr('orchestrator_core.storage.db.get_db', lambda: get_db(path))
+    bounds, rows = event_hub.read(cursor)
+    assert bounds[1] > cursor
+    assert rows and all(row['id'] > cursor for row in rows)
+    assert all(job.id in row['data_json'] for row in rows)
 
 
 @pytest.mark.anyio
-async def test_sse_endpoint_query_and_header_reconnect():
+async def test_sse_endpoint_query_and_header_reconnect(monkeypatch):
+    from starlette.requests import Request
     from orchestrator_core.routes.jobs import stream_job_events
-
-    event_hub.publish("job.created", {"job_id": "test_job_sse", "status": "queued"})
-    eid = event_hub._counter
-
-    # 1. Query parameter reconnection
-    resp_query = await stream_job_events(last_event_id=None, last_event_id_query=str(eid - 1))
-    msg_query = await resp_query.body_iterator.__anext__()
-    assert f"id: {eid}" in msg_query
-    await resp_query.body_iterator.aclose()
-
-    # 2. Header reconnection
-    resp_header = await stream_job_events(last_event_id=str(eid - 1), last_event_id_query=None)
-    msg_header = await resp_header.body_iterator.__anext__()
-    assert f"id: {eid}" in msg_header
-    await resp_header.body_iterator.aclose()
-
-
+    received = []
+    async def stream(last_event_id=None, session_token=None):
+        received.append((last_event_id, session_token))
+        yield 'event: fixture\ndata: {}\n\n'
+    monkeypatch.setattr(event_hub, 'subscribe', stream)
+    request = Request({'type': 'http', 'headers': [(b'cookie', b'orchestrator_session=fixture')]})
+    for header, query, expected in [(None, '12', '12'), ('13', '12', '13')]:
+        response = stream_job_events(request, last_event_id=header, last_event_id_query=query)
+        assert 'fixture' in await response.body_iterator.__anext__()
+        assert received[-1] == (expected, 'fixture')
+        await response.body_iterator.aclose()

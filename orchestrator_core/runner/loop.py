@@ -163,7 +163,7 @@ def run_job(
                 "current_cost": exc.current_cost,
                 "budget_limit": exc.budget_limit,
                 "message": str(exc),
-            })
+            }, db=db)
             log_audit(
                 actor="runner_caps",
                 event="budget_ceiling_exceeded",
