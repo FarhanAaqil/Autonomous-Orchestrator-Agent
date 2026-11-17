@@ -12,6 +12,7 @@ from typing import Literal, Optional
 from dotenv import load_dotenv
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from orchestrator_core.version import VERSION
 
 # Preload .env into os.environ so all standard library / SDK modules have access
 load_dotenv(override=False)
@@ -33,7 +34,9 @@ class Settings(BaseSettings):
     environment: Literal["development", "staging", "production"] = "development"
     allow_insecure_local: bool = False
     action_execution_mode: Literal["disabled", "simulation", "live"] = "disabled"
-    app_version: str = "1.0.0"
+    @property
+    def app_version(self) -> str:
+        return VERSION
     executor_hmac_secret: str = Field(
         default="aaqil-secret-hmac-key-dev-environment",
         validation_alias=AliasChoices("executor_hmac_secret", "EXECUTOR_HMAC_SECRET"),
