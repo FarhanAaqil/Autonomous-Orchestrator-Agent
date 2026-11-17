@@ -58,3 +58,11 @@ def migrate_extensions(conn):
             conn.execute("ALTER TABLE jobs ADD COLUMN work_kind TEXT NOT NULL DEFAULT 'agent'")
             conn.execute("ALTER TABLE jobs ADD COLUMN work_payload_json TEXT NOT NULL DEFAULT '{}'")
             conn.execute('INSERT INTO application_migrations VALUES (10)')
+        if not conn.execute('SELECT 1 FROM application_migrations WHERE version=11').fetchone():
+            conn.execute('ALTER TABLE users ADD COLUMN email TEXT')
+            conn.execute('ALTER TABLE users ADD COLUMN email_verified_at TEXT')
+            conn.execute("UPDATE users SET email=lower(username),email_verified_at=created_at")
+            conn.execute('CREATE UNIQUE INDEX idx_users_email ON users(email)')
+            conn.execute("CREATE TABLE account_tokens (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), purpose TEXT NOT NULL CHECK(purpose IN ('verify','reset')), expires_at TEXT NOT NULL, created_at TEXT NOT NULL)")
+            conn.execute('CREATE INDEX idx_account_tokens_user ON account_tokens(user_id)')
+            conn.execute('INSERT INTO application_migrations VALUES (11)')

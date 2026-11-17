@@ -42,6 +42,15 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("executor_hmac_secret", "EXECUTOR_HMAC_SECRET"),
     )
 
+    public_registration: bool = False
+    public_base_url: str = "http://127.0.0.1:8080"
+    smtp_host: Optional[str] = None
+    smtp_port: int = 587
+    smtp_username: Optional[str] = None
+    smtp_password: Optional[str] = Field(default=None, repr=False)
+    smtp_from: Optional[str] = None
+    smtp_tls: Literal['starttls', 'ssl'] = 'starttls'
+
     # External integrations & credentials
     email_address: Optional[str] = Field(
         default=None,
@@ -87,6 +96,9 @@ class Settings(BaseSettings):
         token = (self.auth_token or "").strip()
         if not token and (secured or not self.allow_insecure_local):
             raise ValueError("AUTH_TOKEN is required; local development must explicitly set ALLOW_INSECURE_LOCAL=true")
+        if secured and self.public_registration:
+            if not self.public_base_url.startswith('https://') or not self.smtp_host or not self.smtp_from:
+                raise ValueError('Public signup requires HTTPS PUBLIC_BASE_URL and SMTP delivery settings')
         if secured:
             from urllib.parse import urlsplit, unquote
             database = urlsplit(self.database_url or '')
