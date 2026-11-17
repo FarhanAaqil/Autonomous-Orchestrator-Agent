@@ -15,7 +15,7 @@ line to eval/index.json for trend tracking.
 
 Usage:
     python eval/run_eval.py                          # live LLM, all 209 cases
-    python eval/run_eval.py --dry-run                # offline/CI mock mode
+    python eval/run_eval.py --dry-run                # offline heuristic mode
     python eval/run_eval.py --split test             # frozen test split only (CI gate)
     python eval/run_eval.py --split dev              # dev split for prompt tuning only
     python eval/run_eval.py --ci-gate                # exit 1 if below thresholds
@@ -70,7 +70,7 @@ def filter_by_split(dataset: list[dict], split: str) -> list[dict]:
 
 
 def run_classification(dataset: list[dict], dry_run: bool = False) -> list[dict]:
-    """Run classify() on every entry. When dry_run=True, mocks realistic router responses."""
+    """Evaluate actual predictions. Expected labels are used only for scoring."""
     results = []
     for entry in dataset:
         command = entry["command"]
@@ -80,20 +80,10 @@ def run_classification(dataset: list[dict], dry_run: bool = False) -> list[dict]
 
         try:
             if dry_run:
-                # Generic offline mock: adversarial/injection cases → general_chat, rest → correct agent
-                if adversarial and expected == "general_chat_agent":
-                    result = RouterResult(agent="general_chat_agent", confidence=0.80,
-                                         reasoning="Adversarial input routed to general chat")
-                elif ambiguous:
-                    # Ambiguous cases intentionally have lower confidence
-                    conf = 0.75
-                    result = RouterResult(agent=expected, confidence=conf,
-                                         reasoning="Ambiguous — routed to most likely agent")
-                else:
-                    result = RouterResult(agent=expected, confidence=0.95,
-                                         reasoning=f"Matches {expected} scope")
+                from orchestrator_core.core.router import _heuristic_classify
+                result = RouterResult(**_heuristic_classify(command))
             else:
-                result = classify(command)
+                result = classify(command, use_cache=False, allow_fallback=False)
 
             if isinstance(result, RouterResult):
                 predicted = result.agent
@@ -122,6 +112,7 @@ def run_classification(dataset: list[dict], dry_run: bool = False) -> list[dict]
             "ambiguous": ambiguous,
             "adversarial": adversarial,
             "split": entry.get("split", "all"),
+            "mode": "offline" if dry_run else "live",
         })
 
         status = "OK" if correct else ("??" if clarification else "XX")
@@ -218,6 +209,12 @@ def write_results(metrics: dict, results: list[dict], dataset_path: Path, no_sav
         "run_at": datetime.now(timezone.utc).isoformat(),
         "dataset": str(dataset_path),
         "prompt_hash": prompt_hash(),
+        "mode": results[0]['mode'] if results else 'empty',
+        "fallback_rate": 0.0,
+        "confidence_threshold": __import__('orchestrator_core.config', fromlist=['get_settings']).get_settings().router_confidence_threshold,
+        "dataset_sha256": hashlib.sha256(dataset_path.read_bytes()).hexdigest(),
+        "code_commit": __import__('subprocess').check_output(['git', 'rev-parse', 'HEAD'], cwd=_REPO_ROOT, text=True).strip(),
+        "model": 'heuristic' if results and results[0]['mode'] == 'offline' else os.environ.get('ROUTER_MODEL', 'openai/gpt-oss-120b'),
         "metrics": metrics,
         "results": results,
     }
@@ -245,6 +242,7 @@ def append_index(
     entry = {
         "run_at": datetime.now(timezone.utc).isoformat(),
         "split": split,
+        "mode": metrics.get("mode"),
         "accuracy": metrics["accuracy"],
         "correct": metrics["correct"],
         "total": metrics["total"],
@@ -286,7 +284,7 @@ def check_ci_gate(metrics: dict, split: str) -> tuple[bool, list[str]]:
     if INDEX_PATH.exists():
         try:
             entries = json.loads(INDEX_PATH.read_text())
-            same_split = [e for e in entries if e.get("split") == split]
+            same_split = [e for e in entries if e.get("split") == split and e.get("mode") == metrics.get("mode")]
             if same_split:
                 last_acc = same_split[-1].get("accuracy", 0)
                 drop = last_acc - acc
@@ -306,7 +304,7 @@ def check_ci_gate(metrics: dict, split: str) -> tuple[bool, list[str]]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Router accuracy evaluator")
     parser.add_argument("--dataset", default=str(DATASET_DEFAULT), help="Path to eval dataset JSON")
-    parser.add_argument("--dry-run", action="store_true", help="Classify using dry-run mocks (offline/CI mode)")
+    parser.add_argument("--dry-run", action="store_true", help="Evaluate the actual offline heuristic without provider calls")
     parser.add_argument("--no-save", action="store_true", help="Do not write results or update index.json")
     parser.add_argument(
         "--split", choices=["dev", "test", "all"], default="all",
@@ -335,6 +333,7 @@ def main() -> None:
 
     results = run_classification(dataset, dry_run=args.dry_run)
     metrics = compute_metrics(results)
+    metrics["mode"] = "offline" if args.dry_run else "live"
 
     print(f"\n-- Results (split={args.split}) ----------------------")
     print(f"  Accuracy : {metrics['accuracy']:.1%}  ({metrics['correct']}/{metrics['total']})")
