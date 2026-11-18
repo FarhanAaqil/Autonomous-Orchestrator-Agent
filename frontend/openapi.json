@@ -970,6 +970,17 @@
             "title": "Tokens Used",
             "type": "integer"
           },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
           "work_kind": {
             "default": "agent",
             "title": "Work Kind",
@@ -1531,6 +1542,30 @@
         "title": "PipelineStepRecord",
         "type": "object"
       },
+      "PlanGrant": {
+        "properties": {
+          "paid_until": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid Until"
+          },
+          "plan": {
+            "title": "Plan",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan"
+        ],
+        "title": "PlanGrant",
+        "type": "object"
+      },
       "ReconciliationRequest": {
         "properties": {
           "evidence": {
@@ -1962,6 +1997,154 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/account": {
+      "get": {
+        "operationId": "account_summary_account_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Account Summary",
+        "tags": [
+          "Account"
+        ]
+      }
+    },
+    "/account/connections": {
+      "get": {
+        "operationId": "connections_account_connections_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Connections",
+        "tags": [
+          "Account"
+        ]
+      }
+    },
+    "/account/connections/{provider}": {
+      "delete": {
+        "operationId": "disconnect_provider_account_connections__provider__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Disconnect Provider",
+        "tags": [
+          "Account"
+        ]
+      }
+    },
+    "/account/users/{user_id}/plan": {
+      "put": {
+        "operationId": "change_plan_account_users__user_id__plan_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanGrant"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Change Plan",
+        "tags": [
+          "Account"
+        ]
+      }
+    },
     "/agents": {
       "get": {
         "description": "Return the complete roster of orchestrator agents with live health and tool statuses.",

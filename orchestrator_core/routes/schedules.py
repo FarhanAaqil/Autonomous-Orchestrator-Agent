@@ -16,6 +16,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, model_validator
 
+from orchestrator_core.storage.transactions import transaction
+from orchestrator_core.core.plans import require_schedule_capacity
 from orchestrator_core.core.ownership import request_owner
 from orchestrator_core.dependencies import verify_bearer_token
 from orchestrator_core.jobs.service import JobService
@@ -108,7 +110,9 @@ def create_schedule(
     from orchestrator_core.core.scheduler import next_occurrence
     following = next_occurrence(body.cron_expr, body.timezone, datetime.now(timezone.utc))
 
-    with db:
+    with transaction(db):
+        if body.is_active:
+            require_schedule_capacity(db, owner)
         db.execute(
             """
             INSERT INTO schedules (id, name, agent, goal, cron_expr, is_active, created_at, updated_at, timezone, next_run_at, user_id)
@@ -204,7 +208,9 @@ def update_schedule(
     params.append(now)
     params.extend([schedule_id, owner or ""])
 
-    with db:
+    with transaction(db):
+        if body.is_active is True or (body.is_active is None and row["is_active"]):
+            require_schedule_capacity(db, owner, excluding=schedule_id)
         db.execute(f"UPDATE schedules SET {', '.join(updates)} WHERE id = ? AND COALESCE(user_id,'')=?", params)
 
     updated_row = db.execute("SELECT * FROM schedules WHERE id = ? AND COALESCE(user_id,'')=?", (schedule_id, owner or "")).fetchone()

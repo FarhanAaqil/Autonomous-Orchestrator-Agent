@@ -276,9 +276,18 @@ from orchestrator_core.routes import system as system_module
 from orchestrator_core.routes import memory as memory_module
 from orchestrator_core.routes import schedules as schedules_module
 
+from orchestrator_core.core.plans import PlanLimitExceeded
+
+@app.exception_handler(PlanLimitExceeded)
+async def plan_limit_error(request, exc):
+    return JSONResponse(status_code=429, content={'detail': str(exc)})
+
+
 auth_dependencies = [Depends(verify_bearer_token)]
 from orchestrator_core.routes.auth import router as auth_router
 app.include_router(auth_router)
+from orchestrator_core.routes.account import router as account_router
+app.include_router(account_router, dependencies=auth_dependencies)
 
 app.include_router(route_module.router, dependencies=auth_dependencies)
 app.include_router(dispatch_module.router, dependencies=auth_dependencies)

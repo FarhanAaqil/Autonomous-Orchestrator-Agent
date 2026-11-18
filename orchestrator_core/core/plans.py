@@ -49,3 +49,51 @@ def grant_plan(db, actor_id, user_id, plan, paid_until=None):
         if changed.rowcount != 1:
             raise ValueError('Account not found')
         log_audit(db, actor_id, 'plan_changed', 'user', user_id, {'plan': plan, 'paid_until': paid_until})
+
+
+class PlanLimitExceeded(ValueError):
+    pass
+
+
+def require_capacity(db, user_id, resource, used, requested=1):
+    if user_id is None:
+        return  # Local legacy workspace, never a public account.
+    limit = account_plan(db, user_id)['limits'][resource]
+    if used + requested > limit:
+        raise PlanLimitExceeded(f'Your plan allows {limit} {resource.replace("_", " ")}')
+
+
+def require_job_capacity(db, user_id):
+    if user_id is None:
+        return
+    day = datetime.now(timezone.utc).date().isoformat()
+    used = db.execute('SELECT COUNT(*) FROM jobs WHERE user_id=? AND substr(created_at,1,10)=?', (user_id, day)).fetchone()[0]
+    require_capacity(db, user_id, 'runs_per_day', used)
+
+
+def can_claim(db, user_id):
+    if user_id is None:
+        return True
+    user = db.execute('SELECT * FROM users WHERE id=? AND active=1', (user_id,)).fetchone()
+    if not user:
+        return False
+    used = db.execute("SELECT COUNT(*) FROM jobs WHERE user_id=? AND status='running'", (user_id,)).fetchone()[0]
+    return used < PLANS[effective_plan(user)]['concurrent_runs']
+
+
+def require_schedule_capacity(db, user_id, excluding=None):
+    if user_id is None:
+        return
+    used = db.execute('SELECT COUNT(*) FROM schedules WHERE user_id=? AND is_active=1 AND id<>?', (user_id, excluding or '')).fetchone()[0]
+    require_capacity(db, user_id, 'active_schedules', used)
+
+
+def usage_summary(db, user_id):
+    day = datetime.now(timezone.utc).date().isoformat()
+    return {
+        'day_utc': day,
+        'runs': db.execute('SELECT COUNT(*) FROM jobs WHERE user_id=? AND substr(created_at,1,10)=?', (user_id, day)).fetchone()[0],
+        'tokens': db.execute('SELECT COALESCE(SUM(COALESCE(tokens_in+tokens_out,reserved_tokens)),0) FROM provider_usage WHERE user_id=? AND substr(used_at,1,10)=?', (user_id, day)).fetchone()[0],
+        'active_schedules': db.execute('SELECT COUNT(*) FROM schedules WHERE user_id=? AND is_active=1', (user_id,)).fetchone()[0],
+        'connected_accounts': db.execute('SELECT COUNT(*) FROM connections WHERE user_id=?', (user_id,)).fetchone()[0],
+    }

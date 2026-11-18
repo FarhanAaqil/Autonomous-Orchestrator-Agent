@@ -31,7 +31,11 @@ def store_connection(db, user_id, provider, secret, scopes):
     active, keys = keyring()
     payload = json.dumps({'user_id': user_id, 'provider': provider, 'secret': secret}, separators=(',', ':'))
     ciphertext = keys[active].encrypt(payload.encode()).decode()
-    with db:
+    from orchestrator_core.storage.transactions import transaction
+    from orchestrator_core.core.plans import require_capacity
+    with transaction(db):
+        count = db.execute('SELECT COUNT(*) FROM connections WHERE user_id=? AND provider<>?', (user_id, provider)).fetchone()[0]
+        require_capacity(db, user_id, 'connected_accounts', count)
         db.execute('INSERT INTO connections(user_id,provider,credentials,key_id,scopes,status,created_at) VALUES (?,?,?,?,?,?,?) '
                    "ON CONFLICT(user_id,provider) DO UPDATE SET credentials=excluded.credentials,key_id=excluded.key_id,scopes=excluded.scopes,status='connected',created_at=excluded.created_at,last_used_at=NULL",
                    (user_id, provider, ciphertext, active, json.dumps(sorted(set(scopes))), 'connected', now().isoformat()))

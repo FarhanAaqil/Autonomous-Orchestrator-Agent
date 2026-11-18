@@ -80,6 +80,8 @@ class JobService:
         not_before_str = not_before.isoformat() if not_before else None
 
         with transaction(db):
+            from orchestrator_core.core.plans import require_job_capacity
+            require_job_capacity(db, owner)
             if current_lease.get():
                 require_lease(db)
             db.execute(
@@ -184,6 +186,12 @@ class JobService:
         """
         now = datetime.now(timezone.utc).isoformat()
         with transaction(db):
+            from orchestrator_core.core.plans import can_claim
+            candidates = db.execute("SELECT id,user_id FROM jobs WHERE status='queued' AND (not_before IS NULL OR not_before<=?) AND (CAST(? AS TEXT) IS NULL OR id=?) ORDER BY priority,created_at", (now, job_id, job_id)).fetchall()
+            selected = next((candidate for candidate in candidates if can_claim(db, candidate['user_id'])), None)
+            if selected is None:
+                return None
+            job_id = selected['id']
             cur = db.execute(
                 """
                 UPDATE jobs

@@ -1,0 +1,50 @@
+"""Personal account metadata, usage, and manually administered plan expiry."""
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from orchestrator_core.core.ownership import request_owner
+from orchestrator_core.core.plans import account_plan, usage_summary, grant_plan
+from orchestrator_core.core.connections import list_connections, disconnect
+from orchestrator_core.storage.db import get_db_connection
+
+router = APIRouter(prefix='/account', tags=['Account'])
+
+
+def personal_owner(owner=Depends(request_owner)):
+    if owner is None:
+        raise HTTPException(401, 'Sign in with a personal account')
+    return owner
+
+
+@router.get('')
+def account_summary(db=Depends(get_db_connection), owner=Depends(personal_owner)):
+    row = db.execute('SELECT username,email,email_verified_at,execution_mode FROM users WHERE id=? AND active=1', (owner,)).fetchone()
+    if not row:
+        raise HTTPException(401, 'Account unavailable')
+    return {**dict(row), **account_plan(db, owner), 'usage': usage_summary(db, owner)}
+
+
+@router.get('/connections')
+def connections(db=Depends(get_db_connection), owner=Depends(personal_owner)):
+    return list_connections(db, owner)
+
+
+@router.delete('/connections/{provider}')
+def disconnect_provider(provider: str, db=Depends(get_db_connection), owner=Depends(personal_owner)):
+    disconnect(db, owner, provider)
+    return {'disconnected': True}
+
+
+class PlanGrant(BaseModel):
+    plan: str
+    paid_until: str | None = None
+
+
+@router.put('/users/{user_id}/plan')
+def change_plan(user_id: str, body: PlanGrant, db=Depends(get_db_connection), owner=Depends(personal_owner)):
+    try:
+        grant_plan(db, owner, user_id, body.plan, body.paid_until)
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return account_plan(db, user_id)
