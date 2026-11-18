@@ -47,3 +47,48 @@ def test_context_never_reads_another_owners_messages_or_memory(db):
     assert 'ALICE_MEMORY' in build_context(db, 'private', owner=alice)['memory_context']
     result = build_context(db, 'private', owner=bob)
     assert result == {'conversation_history_text': '', 'memory_context': ''}
+
+
+@pytest.mark.parametrize('other_role', ['operator', 'administrator'])
+def test_memory_routes_reject_foreign_ids_and_sources(db, other_role, monkeypatch):
+    monkeypatch.setattr('orchestrator_core.memory.semantic._sync_to_chroma', lambda *a, **k: None)
+    create_user(db, 'alice', 'fixture-password-123')
+    create_user(db, 'other', 'fixture-password-123', other_role)
+    app.dependency_overrides[get_db_connection] = lambda: db
+    try:
+        alice, other = TestClient(app), TestClient(app)
+        headers = {}
+        for name, client in [('alice', alice), ('other', other)]:
+            csrf = client.post('/auth/login', json={'username': name, 'password': 'fixture-password-123'}).json()['csrf_token']
+            headers[name] = {'x-csrf-token': csrf}
+        cid = alice.post('/conversations', json={'title': 'Private'}, headers=headers['alice']).json()['id']
+        response = alice.post('/memory', json={'value': 'ALICE_SECRET', 'source_session_id': cid}, headers=headers['alice'])
+        assert response.status_code == 201
+        mid = response.json()['id']
+        assert other.get('/memory').json() == []
+        assert other.get('/memory/' + mid).status_code == 404
+        assert other.patch('/memory/' + mid, json={'value': 'overwritten'}, headers=headers['other']).status_code == 404
+        assert other.post('/memory/' + mid + '/confirm', headers=headers['other']).status_code == 404
+        assert other.delete('/memory/' + mid, headers=headers['other']).status_code == 404
+        assert other.post('/memory/summarize/' + cid, headers=headers['other']).status_code == 404
+        assert other.post('/memory', json={'value': 'fake source', 'source_session_id': cid}, headers=headers['other']).status_code == 400
+        assert alice.get('/memory/' + mid).json()['value'] == 'ALICE_SECRET'
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_retrieval_rechecks_owner_even_when_vector_index_returns_foreign_ids(db, monkeypatch):
+    from orchestrator_core.memory.retrieval import get_context_slice
+    alice = create_user(db, 'alice', 'fixture-password-123')['id']
+    bob = create_user(db, 'bob', 'fixture-password-123')['id']
+    with db:
+        db.execute("INSERT INTO memory_items(id,kind,value,pending_review,user_id) VALUES ('private-memory','fact','ALICE_SECRET',0,?)", (alice,))
+        db.execute("INSERT INTO memory_items(id,kind,value,pending_review,user_id) VALUES ('own-memory','fact','BOB_FACT',0,?)", (bob,))
+    class PoisonedIndex:
+        def query(self, **kwargs):
+            assert kwargs['where'] == {'user_id': bob}
+            return {'ids': [['private-memory']], 'documents': [['ALICE_SECRET']]}
+    monkeypatch.setattr('orchestrator_core.memory.retrieval.get_agent_collection', lambda *a, **k: PoisonedIndex())
+    context = get_context_slice('facts', db, owner=bob)
+    assert 'BOB_FACT' in context
+    assert 'ALICE_SECRET' not in context

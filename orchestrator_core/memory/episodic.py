@@ -61,6 +61,7 @@ def summarize_session(
     db: sqlite3.Connection,
     llm_callable: Optional[Callable[[str], str]] = None,
     chroma_client: Optional[Any] = None,
+    owner: Optional[str] = None,
 ) -> Optional[MemoryItemRecord]:
     """
     Summarize a completed or idle conversation session into an episodic memory item.
@@ -71,10 +72,10 @@ def summarize_session(
         """
         SELECT role, content, agent, created_at
         FROM messages
-        WHERE conversation_id = ?
+        WHERE conversation_id = ? AND COALESCE(user_id,'')=?
         ORDER BY created_at ASC
         """,
-        (session_id,),
+        (session_id, owner or ""),
     ).fetchall()
 
     if not rows:
@@ -102,8 +103,8 @@ def summarize_session(
             """
             INSERT INTO memory_items (
                 id, kind, key, value, source_session_id, source_message_id,
-                pending_review, created_at, updated_at, deleted
-            ) VALUES (?, 'episode_summary', ?, ?, ?, NULL, 0, ?, ?, 0)
+                pending_review, created_at, updated_at, deleted, user_id
+            ) VALUES (?, 'episode_summary', ?, ?, ?, NULL, 0, ?, ?, 0, ?)
             """,
             (
                 item_id,
@@ -112,6 +113,7 @@ def summarize_session(
                 session_id,
                 now_iso,
                 now_iso,
+                owner,
             ),
         )
 
@@ -122,6 +124,7 @@ def summarize_session(
             ids=[item_id],
             documents=[summary_text.strip()],
             metadatas=[{
+                "user_id": owner or "",
                 "id": item_id,
                 "kind": "episode_summary",
                 "source_session_id": session_id,

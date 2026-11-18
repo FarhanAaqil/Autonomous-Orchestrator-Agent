@@ -43,7 +43,7 @@ def synchronize_vectors(db, collection=None):
             if row['deleted'] or row['pending_review']:
                 coll.delete(ids=[row['id']])
             else:
-                coll.upsert(ids=[row['id']], documents=[row['value']], metadatas=[{'kind': row['kind']}])
+                coll.upsert(ids=[row['id']], documents=[row['value']], metadatas=[{'kind': row['kind'], 'user_id': row['user_id'] or ''}])
         try:
             bounded_call(sync, timeout=10)
         except Exception:
