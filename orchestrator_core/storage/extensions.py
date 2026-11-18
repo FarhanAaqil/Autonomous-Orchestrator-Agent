@@ -66,3 +66,10 @@ def migrate_extensions(conn):
             conn.execute("CREATE TABLE account_tokens (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), purpose TEXT NOT NULL CHECK(purpose IN ('verify','reset')), expires_at TEXT NOT NULL, created_at TEXT NOT NULL)")
             conn.execute('CREATE INDEX idx_account_tokens_user ON account_tokens(user_id)')
             conn.execute('INSERT INTO application_migrations VALUES (11)')
+        if not conn.execute('SELECT 1 FROM application_migrations WHERE version=12').fetchone():
+            conn.execute("ALTER TABLE users ADD COLUMN plan TEXT NOT NULL DEFAULT 'free'")
+            conn.execute('ALTER TABLE users ADD COLUMN paid_until TEXT')
+            conn.execute("ALTER TABLE users ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'simulation'")
+            conn.execute("CREATE TABLE connections (user_id TEXT NOT NULL REFERENCES users(id), provider TEXT NOT NULL, credentials TEXT NOT NULL, key_id TEXT NOT NULL, scopes TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, last_used_at TEXT, PRIMARY KEY(user_id,provider))")
+            conn.execute('CREATE INDEX idx_connections_user ON connections(user_id)')
+            conn.execute('INSERT INTO application_migrations VALUES (12)')
