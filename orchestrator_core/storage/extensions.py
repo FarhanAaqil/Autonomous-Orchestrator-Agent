@@ -73,3 +73,13 @@ def migrate_extensions(conn):
             conn.execute("CREATE TABLE connections (user_id TEXT NOT NULL REFERENCES users(id), provider TEXT NOT NULL, credentials TEXT NOT NULL, key_id TEXT NOT NULL, scopes TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, last_used_at TEXT, PRIMARY KEY(user_id,provider))")
             conn.execute('CREATE INDEX idx_connections_user ON connections(user_id)')
             conn.execute('INSERT INTO application_migrations VALUES (12)')
+        if not conn.execute('SELECT 1 FROM application_migrations WHERE version=13').fetchone():
+            from orchestrator_core.core.ownership import OWNED_TABLES
+            for table in OWNED_TABLES:
+                conn.execute(f'ALTER TABLE {table} ADD COLUMN user_id TEXT REFERENCES users(id)')
+                conn.execute(f'CREATE INDEX idx_{table}_owner ON {table}(user_id)')
+            owner = conn.execute("SELECT id FROM users WHERE role='administrator' ORDER BY created_at,id LIMIT 1").fetchone()
+            if owner:
+                from orchestrator_core.core.ownership import adopt_legacy_rows
+                adopt_legacy_rows(conn, owner['id'])
+            conn.execute('INSERT INTO application_migrations VALUES (13)')

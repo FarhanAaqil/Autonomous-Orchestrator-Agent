@@ -37,8 +37,8 @@ def test_recent_history_is_chronological_and_has_older_pages(db):
         for i in range(5):
             db.execute("INSERT INTO messages(id,conversation_id,role,content,created_at) VALUES (?,'history','user',?,?)",
                        (str(i), str(i), f'2026-01-01T00:00:0{i}+00:00'))
-    recent = get_conversation_messages('history', limit=2, offset=0, db=db)
-    older = get_conversation_messages('history', limit=2, offset=2, db=db)
+    recent = get_conversation_messages('history', limit=2, offset=0, db=db, owner=None)
+    older = get_conversation_messages('history', limit=2, offset=2, db=db, owner=None)
     assert [row.content for row in recent] == ['3', '4']
     assert [row.content for row in older] == ['1', '2']
 

@@ -30,6 +30,7 @@ from orchestrator_core.models import (
     RouterResult,
     canonical_agent_name,
 )
+from orchestrator_core.core.ownership import request_owner, conversation_for_owner
 from orchestrator_core.storage.db import get_db, get_db_connection
 
 logger = logging.getLogger(__name__)
@@ -322,6 +323,7 @@ class DispatchRequest(BaseModel):
 def dispatch_command(
     body: DispatchRequest,
     db: sqlite3.Connection = Depends(get_db_connection),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """
     Classify and immediately execute a command within a persistent conversation thread.
@@ -329,40 +331,40 @@ def dispatch_command(
     """
     require_execution(db)
     t_start = time.monotonic()
-    logger.info("Dispatching command: %.80s", body.command)
+    logger.info("Dispatching authenticated request")
     now = datetime.now(timezone.utc).isoformat()
 
     # 1. Resolve or create conversation session
     cid = body.conversation_id
     if cid:
-        row = db.execute("SELECT id FROM conversations WHERE id = ?", (cid,)).fetchone()
+        row = conversation_for_owner(db, cid, owner)
         if not row:
             title = body.command[:40] + ("..." if len(body.command) > 40 else "")
             with db:
                 db.execute(
-                    "INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
-                    (cid, title, now, now),
+                    "INSERT INTO conversations (id, title, created_at, updated_at, user_id) VALUES (?, ?, ?, ?, ?)",
+                    (cid, title, now, now, owner),
                 )
     else:
         cid = str(uuid.uuid4())
         title = body.command[:40] + ("..." if len(body.command) > 40 else "")
         with db:
             db.execute(
-                "INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
-                (cid, title, now, now),
+                "INSERT INTO conversations (id, title, created_at, updated_at, user_id) VALUES (?, ?, ?, ?, ?)",
+                (cid, title, now, now, owner),
             )
 
     # 2. Retrieve last 10 messages for conversation context
     from orchestrator_core.memory.context import build_context
-    context = build_context(db, cid, body.command)
+    context = build_context(db, cid, body.command, owner=owner)
     history_text = context['conversation_history_text']
 
     # 3. Store user message in messages table
     user_msg_id = str(uuid.uuid4())
     with db:
         db.execute(
-            "INSERT INTO messages (id, conversation_id, role, content, agent, created_at) VALUES (?, ?, 'user', ?, NULL, ?)",
-            (user_msg_id, cid, body.command, now),
+            "INSERT INTO messages (id, conversation_id, role, content, agent, created_at, user_id) VALUES (?, ?, 'user', ?, NULL, ?, ?)",
+            (user_msg_id, cid, body.command, now, owner),
         )
 
     # 3.5 Check for deterministic operational command
@@ -374,8 +376,8 @@ def dispatch_command(
         asst_msg_id = str(uuid.uuid4())
         with db:
             db.execute(
-                "INSERT INTO messages (id, conversation_id, role, content, agent, created_at) VALUES (?, ?, 'assistant', ?, ?, ?)",
-                (asst_msg_id, cid, op_result.output, op_result.agent, datetime.now(timezone.utc).isoformat()),
+                "INSERT INTO messages (id, conversation_id, role, content, agent, created_at, user_id) VALUES (?, ?, 'assistant', ?, ?, ?, ?)",
+                (asst_msg_id, cid, op_result.output, op_result.agent, datetime.now(timezone.utc).isoformat(), owner),
             )
             db.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, cid))
         return op_result
@@ -390,8 +392,8 @@ def dispatch_command(
         clarification_msg = f"Clarification required: {classification.reasoning}. Options: {', '.join(classification.candidates)}"
         with db:
             db.execute(
-                "INSERT INTO messages (id, conversation_id, role, content, agent, created_at) VALUES (?, ?, 'assistant', ?, 'router', ?)",
-                (asst_msg_id, cid, clarification_msg, datetime.now(timezone.utc).isoformat()),
+                "INSERT INTO messages (id, conversation_id, role, content, agent, created_at, user_id) VALUES (?, ?, 'assistant', ?, 'router', ?, ?)",
+                (asst_msg_id, cid, clarification_msg, datetime.now(timezone.utc).isoformat(), owner),
             )
             db.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, cid))
         return JSONResponse(
@@ -455,8 +457,8 @@ def dispatch_command(
     asst_msg_id = str(uuid.uuid4())
     with db:
         db.execute(
-            "INSERT INTO messages (id, conversation_id, role, content, agent, created_at) VALUES (?, ?, 'assistant', ?, ?, ?)",
-            (asst_msg_id, cid, result.output, agent_name, datetime.now(timezone.utc).isoformat()),
+            "INSERT INTO messages (id, conversation_id, role, content, agent, created_at, user_id) VALUES (?, ?, 'assistant', ?, ?, ?, ?)",
+            (asst_msg_id, cid, result.output, agent_name, datetime.now(timezone.utc).isoformat(), owner),
         )
         db.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, cid))
 
@@ -464,11 +466,18 @@ def dispatch_command(
 
 
 @router.post("/stream")
-def dispatch_command_stream(body: DispatchRequest, request: Request):
+def dispatch_command_stream(body: DispatchRequest, request: Request, owner: Optional[str] = Depends(request_owner)):
     """
     Classify and stream responses in real-time via Server-Sent Events (§5c No-Lag).
     Provider output is buffered within its deadline; no first-token latency is promised.
     """
+    if body.conversation_id:
+        check_db = get_db()
+        try:
+            conversation_for_owner(check_db, body.conversation_id, owner)
+        finally:
+            check_db.close()
+
     def event_stream():
         t_start = time.monotonic()
         now = datetime.now(timezone.utc).isoformat()
@@ -478,34 +487,34 @@ def dispatch_command_stream(body: DispatchRequest, request: Request):
             # 1. Resolve or create conversation session
             cid = body.conversation_id
             if cid:
-                row = db.execute("SELECT id FROM conversations WHERE id = ?", (cid,)).fetchone()
+                row = conversation_for_owner(db, cid, owner)
                 if not row:
                     title = body.command[:40] + ("..." if len(body.command) > 40 else "")
                     with db:
                         db.execute(
-                            "INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
-                            (cid, title, now, now),
+                            "INSERT INTO conversations (id, title, created_at, updated_at, user_id) VALUES (?, ?, ?, ?, ?)",
+                            (cid, title, now, now, owner),
                         )
             else:
                 cid = str(uuid.uuid4())
                 title = body.command[:40] + ("..." if len(body.command) > 40 else "")
                 with db:
                     db.execute(
-                        "INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
-                        (cid, title, now, now),
+                        "INSERT INTO conversations (id, title, created_at, updated_at, user_id) VALUES (?, ?, ?, ?, ?)",
+                        (cid, title, now, now, owner),
                     )
 
             # 2. Retrieve history context
             from orchestrator_core.memory.context import build_context
-            context = build_context(db, cid, body.command)
+            context = build_context(db, cid, body.command, owner=owner)
             history_text = context['conversation_history_text']
 
             # 3. Store user message
             user_msg_id = str(uuid.uuid4())
             with db:
                 db.execute(
-                    "INSERT INTO messages (id, conversation_id, role, content, agent, created_at) VALUES (?, ?, 'user', ?, NULL, ?)",
-                    (user_msg_id, cid, body.command, now),
+                    "INSERT INTO messages (id, conversation_id, role, content, agent, created_at, user_id) VALUES (?, ?, 'user', ?, NULL, ?, ?)",
+                    (user_msg_id, cid, body.command, now, owner),
                 )
 
             # 3.5 Check for deterministic operational command
@@ -517,8 +526,8 @@ def dispatch_command_stream(body: DispatchRequest, request: Request):
                 asst_msg_id = str(uuid.uuid4())
                 with db:
                     db.execute(
-                        "INSERT INTO messages (id, conversation_id, role, content, agent, created_at) VALUES (?, ?, 'assistant', ?, ?, ?)",
-                        (asst_msg_id, cid, op_result.output, op_result.agent, datetime.now(timezone.utc).isoformat()),
+                        "INSERT INTO messages (id, conversation_id, role, content, agent, created_at, user_id) VALUES (?, ?, 'assistant', ?, ?, ?, ?)",
+                        (asst_msg_id, cid, op_result.output, op_result.agent, datetime.now(timezone.utc).isoformat(), owner),
                     )
                     db.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, cid))
                 yield f"event: done\ndata: {json.dumps({'output': op_result.output, 'agent': op_result.agent, 'action_type': op_result.action_type, 'approval_id': op_result.approval_id, 'latency_ms': latency_ms, 'conversation_id': cid})}\n\n"
@@ -532,8 +541,8 @@ def dispatch_command_stream(body: DispatchRequest, request: Request):
                 asst_msg_id = str(uuid.uuid4())
                 with db:
                     db.execute(
-                        "INSERT INTO messages (id, conversation_id, role, content, agent, created_at) VALUES (?, ?, 'assistant', ?, 'router', ?)",
-                        (asst_msg_id, cid, clarification_msg, datetime.now(timezone.utc).isoformat()),
+                        "INSERT INTO messages (id, conversation_id, role, content, agent, created_at, user_id) VALUES (?, ?, 'assistant', ?, 'router', ?, ?)",
+                        (asst_msg_id, cid, clarification_msg, datetime.now(timezone.utc).isoformat(), owner),
                     )
                     db.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, cid))
                 yield f"event: clarification\ndata: {json.dumps(classification.model_dump())}\n\n"
@@ -596,8 +605,8 @@ def dispatch_command_stream(body: DispatchRequest, request: Request):
             asst_msg_id = str(uuid.uuid4())
             with db:
                 db.execute(
-                    "INSERT INTO messages (id, conversation_id, role, content, agent, created_at) VALUES (?, ?, 'assistant', ?, ?, ?)",
-                    (asst_msg_id, cid, full_text, agent_name, datetime.now(timezone.utc).isoformat()),
+                    "INSERT INTO messages (id, conversation_id, role, content, agent, created_at, user_id) VALUES (?, ?, 'assistant', ?, ?, ?, ?)",
+                    (asst_msg_id, cid, full_text, agent_name, datetime.now(timezone.utc).isoformat(), owner),
                 )
                 db.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, cid))
 

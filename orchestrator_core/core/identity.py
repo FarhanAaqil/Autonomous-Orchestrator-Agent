@@ -43,6 +43,9 @@ def create_user(db, username, password, role='operator', *, bootstrap=False, act
             raise ValueError('Bootstrap is unavailable after the first account exists')
         db.execute('INSERT INTO users (id,username,password_hash,role,created_at,email,email_verified_at) VALUES (?,?,?,?,?,?,?)',
                    (user_id, username, encoded, role, now().isoformat(), username, now().isoformat() if verified else None))
+        if bootstrap:
+            from orchestrator_core.core.ownership import adopt_legacy_rows
+            adopt_legacy_rows(db, user_id)
         log_audit(db, actor, 'account_created', 'user', user_id, {'role': role})
         db.commit()
     except BaseException:

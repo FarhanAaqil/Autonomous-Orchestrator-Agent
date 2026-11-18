@@ -42,7 +42,7 @@ def tick(db, now=None):
                 db.execute('UPDATE schedules SET next_run_at=? WHERE id=?', (following, row['id']))
                 continue
             job = JobService.create_job(row['agent'], row['goal'], db, schedule_id=row['id'])
-            db.execute('INSERT INTO schedule_occurrences VALUES (?,?,?)', (row['id'], due, job.id))
+            db.execute('INSERT INTO schedule_occurrences (schedule_id,due_at,job_id) VALUES (?,?,?)', (row['id'], due, job.id))
             db.execute('UPDATE schedules SET last_run_at=?,next_run_at=? WHERE id=?', (now.isoformat(), following, row['id']))
             queued.append(job.id)
     with transaction(db):
