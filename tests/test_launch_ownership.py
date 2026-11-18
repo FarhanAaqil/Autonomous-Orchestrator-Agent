@@ -213,3 +213,29 @@ def test_approval_signature_rejects_owner_substitution(db):
         db.execute('UPDATE approvals SET user_id=? WHERE id=?', (bob, aid))
     with pytest.raises(ApprovalSignatureInvalidError):
         gate.execute_approved(aid, db)
+
+
+def test_pipeline_worker_keeps_private_runs_and_steps(db, monkeypatch):
+    from orchestrator_core.jobs.background import enqueue, run_background_job
+    from orchestrator_core.jobs.service import JobService
+    from orchestrator_core.models import AgentResult
+    alice = create_user(db, 'alice', 'fixture-password-123')['id']
+    create_user(db, 'other', 'fixture-password-123', 'administrator')
+    monkeypatch.setattr('orchestrator_core.agents.research_agent.handle', lambda *a, **k: AgentResult(agent='research_agent', output='Private research'))
+    jid = enqueue(db, 'pipeline', {'name': 'research', 'command': 'Private question'}, owner=alice)
+    result = run_background_job(JobService.get_job(jid, db), db)
+    assert result.status == 'succeeded'
+    run = db.execute('SELECT * FROM pipeline_runs').fetchone()
+    assert run['user_id'] == alice
+    assert db.execute('SELECT user_id FROM pipeline_steps').fetchone()['user_id'] == alice
+    app.dependency_overrides[get_db_connection] = lambda: db
+    try:
+        owner_client, other = TestClient(app), TestClient(app)
+        owner_client.post('/auth/login', json={'username': 'alice', 'password': 'fixture-password-123'})
+        other.post('/auth/login', json={'username': 'other', 'password': 'fixture-password-123'})
+        assert owner_client.get('/runs/' + run['run_id']).status_code == 200
+        assert other.get('/runs/' + run['run_id']).status_code == 404
+        assert other.get('/runs').json()['total'] == 0
+        assert other.get('/runs?status=completed').json()['total'] == 0
+    finally:
+        app.dependency_overrides.clear()

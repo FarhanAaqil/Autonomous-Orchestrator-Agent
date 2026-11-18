@@ -83,7 +83,7 @@ def _handle_operational_command(command: str, db: sqlite3.Connection, conversati
 
         try:
             req = PipelineRequest(command=command)
-            run_id = run_pipeline(p_name, req, db)
+            run_id = run_pipeline(p_name, req, db, owner=owner)
 
             steps = db.execute(
                 "SELECT step_number, agent_name, latency_ms, success, output_json, error FROM pipeline_steps WHERE run_id = ? ORDER BY step_number ASC",
@@ -91,8 +91,8 @@ def _handle_operational_command(command: str, db: sqlite3.Connection, conversati
             ).fetchall()
 
             app_row = db.execute(
-                "SELECT id, action_type, payload_json FROM approvals WHERE payload_json LIKE ? ORDER BY created_at DESC LIMIT 1",
-                (f"%{run_id}%",),
+                "SELECT id, action_type, payload_json FROM approvals WHERE payload_json LIKE ? AND COALESCE(user_id,'')=? ORDER BY created_at DESC LIMIT 1",
+                (f"%{run_id}%", owner or ""),
             ).fetchone()
             approval_id = app_row["id"] if app_row else None
 

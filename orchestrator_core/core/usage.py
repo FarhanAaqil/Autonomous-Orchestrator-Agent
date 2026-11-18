@@ -15,6 +15,8 @@ OUTPUT_PER_MILLION = 30.0
 
 
 def reserve(db, messages, output_limit):
+    from orchestrator_core.core.ownership import execution_owner
+    owner = execution_owner.get()
     prompt = len(json.dumps(messages, ensure_ascii=False).encode('utf-8')) + 256
     output_limit = min(int(output_limit), 4096)
     timestamp = datetime.now(timezone.utc).isoformat()
@@ -36,8 +38,8 @@ def reserve(db, messages, output_limit):
         spent = db.execute('SELECT COALESCE(SUM(COALESCE(cost_usd,reserved_cost)),0) FROM provider_usage WHERE substr(used_at,1,10)=?', (timestamp[:10],)).fetchone()[0]
         if spent + cost > limit:
             raise BudgetExceededError(spent+cost, limit)
-        db.execute('INSERT INTO provider_usage (id,job_id,used_at,reserved_tokens,reserved_cost,state) VALUES (?,?,?,?,?,?)',
-                   (reservation, lease[0] if lease else None, timestamp, prompt+output_limit, cost, 'reserved'))
+        db.execute('INSERT INTO provider_usage (id,job_id,used_at,reserved_tokens,reserved_cost,state,user_id) VALUES (?,?,?,?,?,?,?)',
+                   (reservation, lease[0] if lease else None, timestamp, prompt+output_limit, cost, 'reserved', owner))
         db.commit()
     except BaseException:
         db.rollback()

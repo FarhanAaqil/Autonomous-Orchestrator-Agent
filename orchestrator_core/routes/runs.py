@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 import sqlite3
 from pydantic import BaseModel
 
+from orchestrator_core.core.ownership import request_owner
 from orchestrator_core.storage.db import get_db_connection
 from orchestrator_core.models import PipelineRunStatus, PipelineStepRecord
 
@@ -40,24 +41,25 @@ def list_runs(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     db: sqlite3.Connection = Depends(get_db_connection),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """List pipeline execution runs with optional status filter and bounded pagination."""
     if status:
         rows = db.execute(
             "SELECT run_id, pipeline_name, command, status, started_at, completed_at, error "
-            "FROM pipeline_runs WHERE status = ? ORDER BY started_at DESC LIMIT ? OFFSET ?",
-            (status, limit, offset),
+            "FROM pipeline_runs WHERE status = ? AND COALESCE(user_id,'')=? ORDER BY started_at DESC LIMIT ? OFFSET ?",
+            (status, owner or "", limit, offset),
         ).fetchall()
         total = db.execute(
-            "SELECT COUNT(*) FROM pipeline_runs WHERE status = ?", (status,)
+            "SELECT COUNT(*) FROM pipeline_runs WHERE status = ? AND COALESCE(user_id,'')=?", (status, owner or "")
         ).fetchone()[0]
     else:
         rows = db.execute(
             "SELECT run_id, pipeline_name, command, status, started_at, completed_at, error "
-            "FROM pipeline_runs ORDER BY started_at DESC LIMIT ? OFFSET ?",
-            (limit, offset),
+            "FROM pipeline_runs WHERE COALESCE(user_id,'')=? ORDER BY started_at DESC LIMIT ? OFFSET ?",
+            (owner or "", limit, offset),
         ).fetchall()
-        total = db.execute("SELECT COUNT(*) FROM pipeline_runs").fetchone()[0]
+        total = db.execute("SELECT COUNT(*) FROM pipeline_runs WHERE COALESCE(user_id,'')=?", (owner or "",)).fetchone()[0]
 
     return RunListResponse(
         items=[
@@ -79,12 +81,12 @@ def list_runs(
 
 
 @router.get("/{run_id}", response_model=PipelineRunStatus)
-def get_run(run_id: str, db: sqlite3.Connection = Depends(get_db_connection)):
+def get_run(run_id: str, db: sqlite3.Connection = Depends(get_db_connection), owner: Optional[str] = Depends(request_owner)):
     """Return a pipeline run record with all steps ordered by step_number."""
     row = db.execute(
         "SELECT run_id, pipeline_name, command, status, started_at, completed_at, error "
-        "FROM pipeline_runs WHERE run_id = ?",
-        (run_id,),
+        "FROM pipeline_runs WHERE run_id = ? AND COALESCE(user_id,'')=?",
+        (run_id, owner or ""),
     ).fetchone()
 
     if row is None:
@@ -93,8 +95,8 @@ def get_run(run_id: str, db: sqlite3.Connection = Depends(get_db_connection)):
     step_rows = db.execute(
         "SELECT run_id, step_number, agent_name, input_json, output_json, "
         "latency_ms, success, timestamp, error "
-        "FROM pipeline_steps WHERE run_id = ? ORDER BY step_number ASC",
-        (run_id,),
+        "FROM pipeline_steps WHERE run_id = ? AND COALESCE(user_id,'')=? ORDER BY step_number ASC",
+        (run_id, owner or ""),
     ).fetchall()
 
     steps = [
