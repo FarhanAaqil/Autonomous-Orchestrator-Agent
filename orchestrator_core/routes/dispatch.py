@@ -62,7 +62,7 @@ def _get_agent_registry() -> dict:
     }
 
 
-def _handle_operational_command(command: str, db: sqlite3.Connection, conversation_id: str) -> Optional[AgentResult]:
+def _handle_operational_command(command: str, db: sqlite3.Connection, conversation_id: str, owner=None) -> Optional[AgentResult]:
     lower = command.lower().strip()
     if lower in ('kill switch on', 'enable kill switch', 'activate kill switch',
                  'kill switch off', 'disable kill switch', 'deactivate kill switch'):
@@ -255,7 +255,7 @@ def _handle_operational_command(command: str, db: sqlite3.Connection, conversati
 
     # 8. Tasks & Jobs
     if lower in ("show tasks", "list tasks", "all tasks", "tasks", "my tasks"):
-        jobs = db.execute("SELECT id, agent, goal, status, created_at FROM jobs ORDER BY created_at DESC LIMIT 10").fetchall()
+        jobs = db.execute("SELECT id, agent, goal, status, created_at FROM jobs WHERE COALESCE(user_id,'')=? ORDER BY created_at DESC LIMIT 10", (owner or "",)).fetchall()
         if not jobs:
             output = "📋 **No Recorded Tasks**: The autonomous job queue is empty. You can add one by typing `add task: <goal>`."
         else:
@@ -272,17 +272,8 @@ def _handle_operational_command(command: str, db: sqlite3.Connection, conversati
     if lower.startswith("add task:"):
         desc = command.split(":", 1)[1].strip()
         from orchestrator_core.jobs.service import JobService
-        try:
-            job = JobService.create_job(agent="info_agent", goal=desc, db=db, priority=1)
-            job_id = job.id
-        except Exception:
-            job_id = str(uuid.uuid4())
-            now_iso = datetime.now(timezone.utc).isoformat()
-            with db:
-                db.execute(
-                    "INSERT INTO jobs (id, thread_id, agent, goal, status, priority, created_at) VALUES (?, ?, 'info_agent', ?, 'queued', 1, ?)",
-                    (job_id, job_id, desc, now_iso),
-                )
+        job = JobService.create_job(agent="info_agent", goal=desc, db=db, priority=1, owner=owner, session_id=conversation_id)
+        job_id = job.id
         output = (
             f"✅ **Task Successfully Created & Queued**\n\n"
             f"- **Task ID**: `#{job_id[:8]}`\n"
@@ -368,7 +359,7 @@ def dispatch_command(
         )
 
     # 3.5 Check for deterministic operational command
-    op_result = _handle_operational_command(body.command, db, cid)
+    op_result = _handle_operational_command(body.command, db, cid, owner=owner)
     if op_result:
         latency_ms = int((time.monotonic() - t_start) * 1000)
         op_result.metadata["latency_ms"] = latency_ms
@@ -424,7 +415,7 @@ def dispatch_command(
         "conversation_history_text": history_text,
         "memory_context": context['memory_context'],
     }
-    result: AgentResult = run_handler(handler, body.command, db, agent_name, agent_meta, cid)
+    result: AgentResult = run_handler(handler, body.command, db, agent_name, agent_meta, cid, owner=owner)
 
     # 6. Auto-queue approval if write action is triggered and not yet queued
     if result.action_type and not result.approval_id:
@@ -518,7 +509,7 @@ def dispatch_command_stream(body: DispatchRequest, request: Request, owner: Opti
                 )
 
             # 3.5 Check for deterministic operational command
-            op_result = _handle_operational_command(body.command, db, cid)
+            op_result = _handle_operational_command(body.command, db, cid, owner=owner)
             if op_result:
                 latency_ms = int((time.monotonic() - t_start) * 1000)
                 yield f"event: meta\ndata: {json.dumps({'agent': op_result.agent, 'conversation_id': cid, 'confidence': 1.0, 'reasoning': 'Deterministic operational execution'})}\n\n"
@@ -580,7 +571,7 @@ def dispatch_command_stream(body: DispatchRequest, request: Request, owner: Opti
                     "conversation_history_text": history_text,
                     "memory_context": context['memory_context'],
                 }
-                result: AgentResult = run_handler(handler, body.command, db, agent_name, agent_meta, cid)
+                result: AgentResult = run_handler(handler, body.command, db, agent_name, agent_meta, cid, owner=owner)
                 full_text = result.output
                 action_type = result.action_type
                 approval_id = result.approval_id

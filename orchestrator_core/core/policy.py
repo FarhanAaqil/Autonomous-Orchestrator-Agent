@@ -31,13 +31,13 @@ def execution_scope(agent, session_id=None):
         execution_origin.reset(token)
 
 
-def run_handler(handler, command, db, agent, metadata=None, session_id=None):
+def run_handler(handler, command, db, agent, metadata=None, session_id=None, owner=None):
     require_execution(db, agent)
     with execution_scope(agent, session_id):
         from orchestrator_core.core.usage import usage_db, reference_context
         from orchestrator_core.memory.context import build_context
         meta = dict(metadata or {})
-        context = build_context(db, session_id, command)
+        context = build_context(db, session_id, command, owner=owner)
         meta.update(context)
         marker = usage_db.set(db)
         context_marker = reference_context.set(context['conversation_history_text'] + context['memory_context'])

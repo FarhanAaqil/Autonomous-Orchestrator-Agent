@@ -26,3 +26,9 @@ def conversation_for_owner(db, conversation_id, owner):
     if row and row['user_id'] != owner:
         raise HTTPException(404, 'Conversation not found')
     return row
+
+
+def require_owned_job(db, job_id, owner):
+    row = db.execute("SELECT id FROM jobs WHERE id=? AND COALESCE(user_id,'')=?", (job_id, owner or '')).fetchone()
+    if not row:
+        raise HTTPException(404, 'Job not found')

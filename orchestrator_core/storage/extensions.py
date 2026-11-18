@@ -83,3 +83,7 @@ def migrate_extensions(conn):
                 from orchestrator_core.core.ownership import adopt_legacy_rows
                 adopt_legacy_rows(conn, owner['id'])
             conn.execute('INSERT INTO application_migrations VALUES (13)')
+        if not conn.execute('SELECT 1 FROM application_migrations WHERE version=14').fetchone():
+            from orchestrator_core.storage.event_schema import install
+            install(conn, owned=True)
+            conn.execute('INSERT INTO application_migrations VALUES (14)')

@@ -112,13 +112,13 @@ async def test_sse_endpoint_query_and_header_reconnect(monkeypatch):
     from starlette.requests import Request
     from orchestrator_core.routes.jobs import stream_job_events
     received = []
-    async def stream(last_event_id=None, session_token=None):
-        received.append((last_event_id, session_token))
+    async def stream(last_event_id=None, session_token=None, owner=None):
+        received.append((last_event_id, session_token, owner))
         yield 'event: fixture\ndata: {}\n\n'
     monkeypatch.setattr(event_hub, 'subscribe', stream)
     request = Request({'type': 'http', 'headers': [(b'cookie', b'orchestrator_session=fixture')]})
     for header, query, expected in [(None, '12', '12'), ('13', '12', '13')]:
-        response = stream_job_events(request, last_event_id=header, last_event_id_query=query)
+        response = stream_job_events(request, last_event_id=header, last_event_id_query=query, owner="fixture-owner")
         assert 'fixture' in await response.body_iterator.__anext__()
-        assert received[-1] == (expected, 'fixture')
+        assert received[-1] == (expected, 'fixture', 'fixture-owner')
         await response.body_iterator.aclose()

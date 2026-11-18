@@ -92,3 +92,53 @@ def test_retrieval_rechecks_owner_even_when_vector_index_returns_foreign_ids(db,
     context = get_context_slice('facts', db, owner=bob)
     assert 'BOB_FACT' in context
     assert 'ALICE_SECRET' not in context
+
+
+@pytest.mark.parametrize('other_role', ['operator', 'administrator'])
+def test_jobs_are_private_and_cannot_attach_to_foreign_sources(db, other_role, monkeypatch):
+    from orchestrator_core.jobs.events import JobEventHub
+    create_user(db, 'alice', 'fixture-password-123')
+    create_user(db, 'other', 'fixture-password-123', other_role)
+    app.dependency_overrides[get_db_connection] = lambda: db
+    try:
+        clients = {name: TestClient(app) for name in ('alice', 'other')}
+        headers = {}
+        for name, client in clients.items():
+            token = client.post('/auth/login', json={'username': name, 'password': 'fixture-password-123'}).json()['csrf_token']
+            headers[name] = {'x-csrf-token': token}
+        alice, other = clients.values()
+        response = alice.post('/jobs', json={'agent': 'general_chat', 'goal': 'ALICE_PRIVATE_JOB'}, headers=headers['alice'])
+        assert response.status_code == 201
+        jid = response.json()['id']
+        owner = response.json()['user_id']
+        assert other.get('/jobs').json()['total'] == 0
+        for suffix in ('', '/steps'):
+            assert other.get('/jobs/' + jid + suffix).status_code == 404
+        assert other.post('/jobs/' + jid + '/cancel', headers=headers['other']).status_code == 404
+        assert other.post('/jobs/' + jid + '/answer', json={'answer': 'intrusion'}, headers=headers['other']).status_code == 404
+        assert other.post('/jobs', json={'agent': 'general_chat', 'goal': 'child', 'parent_job_id': jid}, headers=headers['other']).status_code == 404
+        assert alice.get('/jobs/' + jid).status_code == 200
+        class BorrowedConnection:
+            def execute(self, *args):
+                return db.execute(*args)
+            def close(self):
+                pass
+        monkeypatch.setattr('orchestrator_core.storage.db.get_db', lambda: BorrowedConnection())
+        hub = JobEventHub()
+        assert any(jid in row['data_json'] for row in hub.read(0, owner=owner)[1])
+        other_id = db.execute("SELECT id FROM users WHERE username='other'").fetchone()['id']
+        assert hub.read(0, owner=other_id)[1] == []
+        assert hub.read(0)[1] == []
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_operational_task_creation_cannot_bypass_policy(db, monkeypatch):
+    from orchestrator_core.routes.dispatch import _handle_operational_command
+    from orchestrator_core.jobs.service import JobService
+    def rejected(**kwargs):
+        raise ValueError('admission rejected')
+    monkeypatch.setattr(JobService, 'create_job', rejected)
+    with pytest.raises(ValueError, match='admission rejected'):
+        _handle_operational_command('add task: denied', db, 'session')
+    assert db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0] == 0

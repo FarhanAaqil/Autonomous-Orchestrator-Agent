@@ -52,8 +52,15 @@ class JobService:
         max_steps: int = 25,
         token_budget: int = 60000,
         not_before: Optional[datetime] = None,
+        owner: Optional[str] = None,
     ) -> JobRecord:
         """Create and queue a new autonomous job."""
+        for table, reference in (("jobs", parent_job_id), ("conversations", session_id), ("schedules", schedule_id)):
+            if reference and not db.execute(
+                f"SELECT id FROM {table} WHERE id=? AND COALESCE(user_id,'')=?",
+                (reference, owner or ''),
+            ).fetchone():
+                raise ValueError("Job source not found")
         canonical_agent = canonical_agent_name(agent)
         from orchestrator_core.core.policy import require_execution
         require_execution(db, canonical_agent)
@@ -81,9 +88,9 @@ class JobService:
                     id, thread_id, parent_job_id, session_id, schedule_id,
                     agent, goal, params_json, status, priority, attempts, max_attempts,
                     not_before, step_count, max_steps, token_budget, tokens_used,
-                    cost_usd, created_at
+                    cost_usd, created_at, user_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, 0, 3, ?, 0, ?, ?, 0, 0.0, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, 0, 3, ?, 0, ?, ?, 0, 0.0, ?, ?)
                 """,
                 (
                     job_id,
@@ -99,6 +106,7 @@ class JobService:
                     max_steps,
                     token_budget,
                     created_at,
+                    owner,
                 ),
             )
 
@@ -140,10 +148,11 @@ class JobService:
         session_id: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
+        owner: Optional[str] = None,
     ) -> tuple[list[JobRecord], int]:
         """List jobs with filters and pagination."""
-        clauses = []
-        params = []
+        clauses = ["COALESCE(user_id,'')=?"]
+        params = [owner or ""]
         if status:
             clauses.append("status = ?")
             params.append(status)
@@ -359,9 +368,9 @@ class JobService:
                 """
                 INSERT INTO job_steps (
                     id, job_id, idx, kind, name, input_json, output_json,
-                    tokens_in, tokens_out, cost_usd, duration_ms, ok, created_at
+                    tokens_in, tokens_out, cost_usd, duration_ms, ok, created_at, user_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     step_id,
@@ -377,6 +386,7 @@ class JobService:
                     duration_ms,
                     1 if ok else 0,
                     created_at,
+                    job.user_id,
                 ),
             )
             # Atomically update step_count and resource counters on the job
