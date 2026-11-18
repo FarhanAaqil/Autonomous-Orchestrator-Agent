@@ -38,6 +38,7 @@ from typing import Any, Optional
 
 from orchestrator_core.config import get_settings
 from orchestrator_core.core.action_catalog import normalize_action, require_adapter
+from orchestrator_core.core.ownership import execution_owner
 from orchestrator_core.core.policy import execution_origin, require_execution
 from orchestrator_core.exceptions import (
     ApprovalAlreadyExecutedError,
@@ -143,6 +144,7 @@ def evaluate_target_policy(
     action_type: str,
     target: Optional[str],
     db: sqlite3.Connection,
+    owner: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     SEC-08: Evaluate recipient/target policy.
@@ -164,8 +166,8 @@ def evaluate_target_policy(
 
     # Check prior successful executions
     prior = db.execute(
-        "SELECT 1 FROM approvals WHERE target = ? AND status = 'confirmed' LIMIT 1",
-        (target,),
+        "SELECT 1 FROM approvals WHERE target = ? AND status = 'confirmed' AND COALESCE(user_id,'')=? LIMIT 1",
+        (target, owner or ""),
     ).fetchone()
 
     is_first_time = prior is None
@@ -219,6 +221,9 @@ def request_approval(
     Stores canonical payload and bound payload_hash.
     """
     action_type, payload, target = normalize_action(action_type, payload, target)
+    owner = execution_owner.get()
+    if idempotency_key is not None and owner is not None:
+        idempotency_key = hashlib.sha256(f'{owner}:{idempotency_key}'.encode()).hexdigest()
     origin_agent, origin_session = execution_origin.get()
     source_agent = source_agent or origin_agent
     session_id = session_id or origin_session
@@ -238,7 +243,7 @@ def request_approval(
             return existing["id"]
 
     # SEC-08 Policy check
-    policy = evaluate_target_policy(action_type, target, db)
+    policy = evaluate_target_policy(action_type, target, db, owner=owner)
     if not policy["allowed"]:
         raise SecurityPolicyViolationError(policy["reason"])
 
@@ -253,9 +258,9 @@ def request_approval(
         """
         INSERT INTO approvals (
             id, action_type, payload_json, target, payload_hash,
-            status, idempotency_key, created_at, expires_at, source_agent, session_id, execution_mode
+            status, idempotency_key, created_at, expires_at, source_agent, session_id, execution_mode, user_id
         )
-        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             approval_id,
@@ -269,6 +274,7 @@ def request_approval(
             source_agent,
             session_id,
             get_settings().action_execution_mode,
+            owner,
         ),
     )
 
@@ -303,7 +309,10 @@ def request_approval(
 # ── State transitions ──────────────────────────────────────────────────────────
 
 def _consent_context(row) -> str:
-    return json.dumps([row["source_agent"], row["session_id"], row["expires_at"], row["execution_mode"]], separators=(",", ":"))
+    fields = [row["source_agent"], row["session_id"], row["expires_at"], row["execution_mode"]]
+    if row["user_id"] is not None:
+        fields.append(row["user_id"])
+    return json.dumps(fields, separators=(",", ":"))
 
 
 @atomic_decision
@@ -446,7 +455,7 @@ def edit_and_supersede(
     action_type, new_payload, target = normalize_action(action_type, new_payload, new_target)
 
     # SEC-08 Policy check
-    policy = evaluate_target_policy(action_type, target, db)
+    policy = evaluate_target_policy(action_type, target, db, owner=row["user_id"])
     if not policy["allowed"]:
         raise SecurityPolicyViolationError(policy["reason"])
 
@@ -467,9 +476,9 @@ def edit_and_supersede(
         """
         INSERT INTO approvals (
             id, action_type, payload_json, target, payload_hash,
-            status, idempotency_key, supersedes_id, created_at, expires_at, source_agent, session_id, execution_mode
+            status, idempotency_key, supersedes_id, created_at, expires_at, source_agent, session_id, execution_mode, user_id
         )
-        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             new_id,
@@ -484,6 +493,7 @@ def edit_and_supersede(
             row["source_agent"],
             row["session_id"],
             get_settings().action_execution_mode,
+            row["user_id"],
         ),
     )
 
@@ -545,7 +555,7 @@ def execute_approved(approval_id: str, db: sqlite3.Connection) -> dict:
     row = db.execute(
         """
         SELECT id, action_type, payload_json, target, payload_hash, status,
-               idempotency_key, approval_signature, approved_hash, decided_at, expires_at, source_agent, session_id, version, execution_mode
+               idempotency_key, approval_signature, approved_hash, decided_at, expires_at, source_agent, session_id, version, execution_mode, user_id
         FROM approvals
         WHERE id = ?
         """,
@@ -631,7 +641,7 @@ def execute_approved(approval_id: str, db: sqlite3.Connection) -> dict:
     db.execute("BEGIN IMMEDIATE")
     with db:
         require_execution(db, row["source_agent"] or "orchestrator", row["action_type"])
-        target_policy = evaluate_target_policy(row["action_type"], row["target"], db)
+        target_policy = evaluate_target_policy(row["action_type"], row["target"], db, owner=row["user_id"])
         if not target_policy["allowed"]:
             raise SecurityPolicyViolationError(target_policy["reason"])
         if datetime.fromisoformat(row["expires_at"]) <= datetime.now(timezone.utc):
@@ -643,8 +653,8 @@ def execute_approved(approval_id: str, db: sqlite3.Connection) -> dict:
         if changed.rowcount != 1:
             raise ApprovalClaimConflictError(approval_id)
         db.execute(
-            "INSERT INTO execution_attempts (id,approval_id,provider_key,outcome,started_at) VALUES (?,?,?,'outcome_unknown',?)",
-            (attempt_id, approval_id, row["idempotency_key"], started_at),
+            "INSERT INTO execution_attempts (id,approval_id,provider_key,outcome,started_at,user_id) VALUES (?,?,?,'outcome_unknown',?,?)",
+            (attempt_id, approval_id, row["idempotency_key"], started_at, row["user_id"]),
         )
         log_audit(db, actor="executor", event="execution_attempted", entity_id=approval_id,
                   detail={"attempt_id": attempt_id, "provider_key": row["idempotency_key"]})

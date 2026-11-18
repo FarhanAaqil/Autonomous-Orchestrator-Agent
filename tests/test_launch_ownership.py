@@ -170,3 +170,46 @@ def test_schedules_keep_their_owner_when_triggered(db, other_role):
         assert other.get('/jobs/' + jid).status_code == 404
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize('other_role', ['operator', 'administrator'])
+def test_approvals_and_audits_are_private(db, other_role):
+    from orchestrator_core.core.approval_gate import request_approval
+    from orchestrator_core.core.policy import execution_scope
+    alice_id = create_user(db, 'alice', 'fixture-password-123')['id']
+    create_user(db, 'other', 'fixture-password-123', other_role)
+    with execution_scope('orchestrator', owner=alice_id):
+        aid = request_approval('send_email', {'to': 'fixture@example.com', 'subject': 'Private', 'body': 'Private'}, db)
+    app.dependency_overrides[get_db_connection] = lambda: db
+    try:
+        alice, other = TestClient(app), TestClient(app)
+        headers = {}
+        for name, client in [('alice', alice), ('other', other)]:
+            token = client.post('/auth/login', json={'username': name, 'password': 'fixture-password-123'}).json()['csrf_token']
+            headers[name] = {'x-csrf-token': token}
+        assert other.get('/approvals').json()['total'] == 0
+        assert other.get('/approvals?status=pending').json()['total'] == 0
+        for suffix in ('', '/audit', '/attempts'):
+            assert other.get('/approvals/' + aid + suffix).status_code == 404
+        for action, body in [('approve', {'expected_hash': 'a' * 64}), ('reject', {}), ('execute', {}), ('edit', {'payload': {'body': 'hijack'}}), ('reconcile', {'outcome': 'confirmed', 'evidence': 'fake'})]:
+            assert other.post('/approvals/' + aid + '/' + action, json=body, headers=headers['other']).status_code == 404
+        assert alice.get('/approvals/' + aid).status_code == 200
+        assert db.execute('SELECT status FROM approvals WHERE id=?', (aid,)).fetchone()['status'] == 'pending'
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_approval_signature_rejects_owner_substitution(db):
+    from orchestrator_core.core import approval_gate as gate
+    from orchestrator_core.core.policy import execution_scope
+    from orchestrator_core.exceptions import ApprovalSignatureInvalidError
+    alice = create_user(db, 'alice', 'fixture-password-123')['id']
+    bob = create_user(db, 'bob', 'fixture-password-123')['id']
+    with execution_scope('orchestrator', owner=alice):
+        aid = gate.request_approval('send_email', {'to': 'fixture@example.com', 'subject': 'Private', 'body': 'Private'}, db)
+    row = db.execute('SELECT * FROM approvals WHERE id=?', (aid,)).fetchone()
+    gate.approve(aid, db, expected_hash=row['payload_hash'])
+    with db:
+        db.execute('UPDATE approvals SET user_id=? WHERE id=?', (bob, aid))
+    with pytest.raises(ApprovalSignatureInvalidError):
+        gate.execute_approved(aid, db)

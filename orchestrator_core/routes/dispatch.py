@@ -146,7 +146,7 @@ def _handle_operational_command(command: str, db: sqlite3.Connection, conversati
     # 2. Approvals - List
     if lower in ("show approvals", "pending approvals", "list approvals", "approvals", "view approvals"):
         rows = db.execute(
-            "SELECT id, action_type, status, payload_json, created_at FROM approvals WHERE status = 'pending' ORDER BY created_at DESC LIMIT 10"
+            "SELECT id, action_type, status, payload_json, created_at FROM approvals WHERE status = 'pending' AND COALESCE(user_id,'')=? ORDER BY created_at DESC LIMIT 10", (owner or '',)
         ).fetchall()
         if not rows:
             output = "🛡️ **Approval Gate Clean**: No actions currently pending human review.\n\nAll requested actions have been authorized and executed or rejected."
@@ -181,11 +181,11 @@ def _handle_operational_command(command: str, db: sqlite3.Connection, conversati
 
     # 5. Quick Status
     if lower in ("quick status", "system status", "status", "cluster status"):
-        pending_appr = db.execute("SELECT COUNT(*) FROM approvals WHERE status = 'pending'").fetchone()[0]
-        total_jobs = db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
-        succ_jobs = db.execute("SELECT COUNT(*) FROM jobs WHERE status = 'succeeded'").fetchone()[0]
-        running_jobs = db.execute("SELECT COUNT(*) FROM jobs WHERE status IN ('running', 'queued')").fetchone()[0]
-        scheds = db.execute("SELECT COUNT(*) FROM schedules WHERE is_active = 1").fetchone()[0]
+        pending_appr = db.execute("SELECT COUNT(*) FROM approvals WHERE status = 'pending' AND COALESCE(user_id,'')=?", (owner or "",)).fetchone()[0]
+        total_jobs = db.execute("SELECT COUNT(*) FROM jobs WHERE COALESCE(user_id,'')=?", (owner or "",)).fetchone()[0]
+        succ_jobs = db.execute("SELECT COUNT(*) FROM jobs WHERE status = 'succeeded' AND COALESCE(user_id,'')=?", (owner or "",)).fetchone()[0]
+        running_jobs = db.execute("SELECT COUNT(*) FROM jobs WHERE status IN ('running', 'queued') AND COALESCE(user_id,'')=?", (owner or "",)).fetchone()[0]
+        scheds = db.execute("SELECT COUNT(*) FROM schedules WHERE is_active = 1 AND COALESCE(user_id,'')=?", (owner or "",)).fetchone()[0]
         ks_row = db.execute("SELECT value FROM system_flags WHERE key = 'kill_switch'").fetchone()
         ks_val = ks_row["value"].strip().lower() if ks_row else "off"
         ks_status = "🔴 ACTIVE (HALTED)" if ks_val in ("on", "1", "true") else "🟢 INACTIVE (NORMAL)"
@@ -209,8 +209,8 @@ def _handle_operational_command(command: str, db: sqlite3.Connection, conversati
         date_str = now_dt.strftime("%A, %B %d, %Y")
         time_str = now_dt.strftime("%I:%M %p")
 
-        pending_appr = db.execute("SELECT COUNT(*) FROM approvals WHERE status = 'pending'").fetchone()[0]
-        jobs_summary = db.execute("SELECT id, goal, status FROM jobs ORDER BY created_at DESC LIMIT 3").fetchall()
+        pending_appr = db.execute("SELECT COUNT(*) FROM approvals WHERE status = 'pending' AND COALESCE(user_id,'')=?", (owner or "",)).fetchone()[0]
+        jobs_summary = db.execute("SELECT id, goal, status FROM jobs WHERE COALESCE(user_id,'')=? ORDER BY created_at DESC LIMIT 3", (owner or "",)).fetchall()
 
         job_lines = [f"- **#{j['id'][:8]}**: {j['goal']} (`{j['status']}`)" for j in jobs_summary]
         jobs_text = "\n".join(job_lines) if job_lines else "- No immediate active jobs. Fleet is idle and ready."

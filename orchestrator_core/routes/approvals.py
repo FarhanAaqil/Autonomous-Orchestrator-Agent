@@ -16,6 +16,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
+from orchestrator_core.core.ownership import request_owner, require_owned_approval
 from orchestrator_core.storage.db import get_db_connection
 from orchestrator_core.core.approval_gate import (
     approve,
@@ -56,22 +57,23 @@ def list_approvals(
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     db: sqlite3.Connection = Depends(get_db_connection),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """List approval records with optional status filter and pagination."""
     if status:
         rows = db.execute(
-            "SELECT * FROM approvals WHERE status = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            (status, limit, offset),
+            "SELECT * FROM approvals WHERE status = ? AND COALESCE(user_id,'')=? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (status, owner or "", limit, offset),
         ).fetchall()
         total = db.execute(
-            "SELECT COUNT(*) FROM approvals WHERE status = ?", (status,)
+            "SELECT COUNT(*) FROM approvals WHERE status = ? AND COALESCE(user_id,'')=?", (status, owner or "")
         ).fetchone()[0]
     else:
         rows = db.execute(
-            "SELECT * FROM approvals ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            (limit, offset),
+            "SELECT * FROM approvals WHERE COALESCE(user_id,'')=? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (owner or "", limit, offset),
         ).fetchall()
-        total = db.execute("SELECT COUNT(*) FROM approvals").fetchone()[0]
+        total = db.execute("SELECT COUNT(*) FROM approvals WHERE COALESCE(user_id,'')=?", (owner or "",)).fetchone()[0]
 
     return ApprovalListResponse(
         items=[dict(r) for r in rows],
@@ -85,8 +87,10 @@ def list_approvals(
 def get_approval(
     approval_id: str,
     db: sqlite3.Connection = Depends(get_db_connection),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """Retrieve a single approval record by ID."""
+    require_owned_approval(db, approval_id, owner)
     row = db.execute("SELECT * FROM approvals WHERE id = ?", (approval_id,)).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail=f"Approval record {approval_id} not found")
@@ -98,11 +102,13 @@ def approve_action(
     approval_id: str,
     body: ApprovalApproveRequest,
     db: sqlite3.Connection = Depends(get_db_connection),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """
     Mark a pending approval as approved.
     TOCTOU: If body.expected_hash is provided, rejects with 409 if hash mismatch.
     """
+    require_owned_approval(db, approval_id, owner)
     expected_hash = body.expected_hash
     approve(approval_id, db, expected_hash=expected_hash, session_id=body.session_id)
     row = db.execute(
@@ -123,8 +129,10 @@ def reject_action(
     approval_id: str,
     body: Optional[ApprovalRejectRequest] = None,
     db: sqlite3.Connection = Depends(get_db_connection),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """Mark a pending approval as rejected."""
+    require_owned_approval(db, approval_id, owner)
     reason = body.reason if body else None
     reject(approval_id, db, reason=reason)
     row = db.execute(
@@ -145,8 +153,10 @@ def edit_approval_action(
     approval_id: str,
     body: ApprovalEditRequest,
     db: sqlite3.Connection = Depends(get_db_connection),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """SEC-06: Supersede existing approval and create a new pending proposal."""
+    require_owned_approval(db, approval_id, owner)
     new_id = edit_and_supersede(approval_id, body.payload, db, new_target=body.target)
     row = db.execute("SELECT * FROM approvals WHERE id = ?", (new_id,)).fetchone()
     return ApprovalRecord(**dict(row))
@@ -156,8 +166,10 @@ def edit_approval_action(
 def execute_action(
     approval_id: str,
     db: sqlite3.Connection = Depends(get_db_connection),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """Execute an approved action (loads payload from DB, no caller-supplied payload)."""
+    require_owned_approval(db, approval_id, owner)
     return execute_approved(approval_id, db)
 
 
@@ -165,8 +177,10 @@ def execute_action(
 def get_approval_audit_trail(
     approval_id: str,
     db: sqlite3.Connection = Depends(get_db_connection),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """SEC-07: Retrieve full audit trail for an approval record."""
+    require_owned_approval(db, approval_id, owner)
     rows = db.execute(
         "SELECT * FROM audit_log WHERE entity = 'approval' AND entity_id = ? ORDER BY created_at ASC",
         (approval_id,),
@@ -181,12 +195,14 @@ class ReconciliationRequest(BaseModel):
 
 @router.post("/{approval_id}/reconcile")
 def reconcile_action(approval_id: str, body: ReconciliationRequest,
-                           db: sqlite3.Connection = Depends(get_db_connection)):
+                           db: sqlite3.Connection = Depends(get_db_connection), owner: Optional[str] = Depends(request_owner)):
+    require_owned_approval(db, approval_id, owner)
     return reconcile_execution(approval_id, body.outcome, body.evidence, db)
 
 
 @router.get("/{approval_id}/attempts")
-def execution_attempts(approval_id: str, db: sqlite3.Connection = Depends(get_db_connection)):
+def execution_attempts(approval_id: str, db: sqlite3.Connection = Depends(get_db_connection), owner: Optional[str] = Depends(request_owner)):
+    require_owned_approval(db, approval_id, owner)
     return [dict(row) for row in db.execute(
         "SELECT * FROM execution_attempts WHERE approval_id=?", (approval_id,)
     ).fetchall()]

@@ -23,17 +23,20 @@ def require_execution(db, agent="orchestrator", action_type=None):
 
 
 @contextmanager
-def execution_scope(agent, session_id=None):
+def execution_scope(agent, session_id=None, owner=None):
+    from orchestrator_core.core.ownership import execution_owner
+    owner_token = execution_owner.set(owner)
     token = execution_origin.set((canonical_agent_name(agent), session_id))
     try:
         yield
     finally:
         execution_origin.reset(token)
+        execution_owner.reset(owner_token)
 
 
 def run_handler(handler, command, db, agent, metadata=None, session_id=None, owner=None):
     require_execution(db, agent)
-    with execution_scope(agent, session_id):
+    with execution_scope(agent, session_id, owner=owner):
         from orchestrator_core.core.usage import usage_db, reference_context
         from orchestrator_core.memory.context import build_context
         meta = dict(metadata or {})

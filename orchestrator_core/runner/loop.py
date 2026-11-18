@@ -305,11 +305,11 @@ def run_job(
 
                     if isinstance(tool_args, dict):
                         require_execution(db, job.agent)
-                        with execution_scope(job.agent, job.session_id):
+                        with execution_scope(job.agent, job.session_id, owner=job.user_id):
                             raw_tool_result = tool_fn(**call_kwargs)
                     else:
                         require_execution(db, job.agent)
-                        with execution_scope(job.agent, job.session_id):
+                        with execution_scope(job.agent, job.session_id, owner=job.user_id):
                             raw_tool_result = tool_fn(tool_args)
                 except Exception as tool_exc:
                     logger.warning("Tool execution error in job %s: %s", job.id, tool_exc)
@@ -404,6 +404,7 @@ def run_job(
                 params=params,
                 thread_id=job.thread_id,
                 parent_job_id=job.id,
+                owner=job.user_id,
                 session_id=job.session_id,
             )
             handoff_payload = json.dumps({

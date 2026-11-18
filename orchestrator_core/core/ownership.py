@@ -1,7 +1,10 @@
 """Explicit request ownership. Service tokens never impersonate a human account."""
+from contextvars import ContextVar
 from fastapi import Depends, HTTPException
 from orchestrator_core.dependencies import verify_bearer_token
 from orchestrator_core.config import get_settings
+
+execution_owner = ContextVar("execution_owner", default=None)
 
 OWNED_TABLES = ('conversations', 'messages', 'jobs', 'job_steps', 'job_events', 'job_dependencies', 'approvals', 'execution_attempts', 'pipeline_runs', 'pipeline_steps', 'memory_items', 'schedules', 'schedule_occurrences', 'provider_usage', 'router_eval_runs')
 
@@ -32,3 +35,9 @@ def require_owned_job(db, job_id, owner):
     row = db.execute("SELECT id FROM jobs WHERE id=? AND COALESCE(user_id,'')=?", (job_id, owner or '')).fetchone()
     if not row:
         raise HTTPException(404, 'Job not found')
+
+
+def require_owned_approval(db, approval_id, owner):
+    row = db.execute("SELECT id FROM approvals WHERE id=? AND COALESCE(user_id,'')=?", (approval_id, owner or '')).fetchone()
+    if not row:
+        raise HTTPException(404, 'Approval not found')
