@@ -142,3 +142,31 @@ def test_operational_task_creation_cannot_bypass_policy(db, monkeypatch):
     with pytest.raises(ValueError, match='admission rejected'):
         _handle_operational_command('add task: denied', db, 'session')
     assert db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0] == 0
+
+
+@pytest.mark.parametrize('other_role', ['operator', 'administrator'])
+def test_schedules_keep_their_owner_when_triggered(db, other_role):
+    create_user(db, 'alice', 'fixture-password-123')
+    create_user(db, 'other', 'fixture-password-123', other_role)
+    app.dependency_overrides[get_db_connection] = lambda: db
+    try:
+        alice, other = TestClient(app), TestClient(app)
+        headers = {}
+        for name, client in [('alice', alice), ('other', other)]:
+            token = client.post('/auth/login', json={'username': name, 'password': 'fixture-password-123'}).json()['csrf_token']
+            headers[name] = {'x-csrf-token': token}
+        response = alice.post('/schedules', json={'name': 'Private', 'agent': 'general_chat', 'goal': 'Private goal'}, headers=headers['alice'])
+        assert response.status_code == 201
+        sid = response.json()['id']
+        assert other.get('/schedules').json() == []
+        assert other.get('/schedules/' + sid).status_code == 404
+        assert other.patch('/schedules/' + sid, json={'goal': 'changed'}, headers=headers['other']).status_code == 404
+        assert other.delete('/schedules/' + sid, headers=headers['other']).status_code == 404
+        assert other.post('/schedules/' + sid + '/run', headers=headers['other']).status_code == 404
+        triggered = alice.post('/schedules/' + sid + '/run', headers=headers['alice'])
+        assert triggered.status_code == 200
+        jid = triggered.json()['job_id']
+        assert alice.get('/jobs/' + jid).status_code == 200
+        assert other.get('/jobs/' + jid).status_code == 404
+    finally:
+        app.dependency_overrides.clear()
