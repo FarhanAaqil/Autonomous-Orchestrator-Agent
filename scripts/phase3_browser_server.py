@@ -32,16 +32,18 @@ else:
     db = get_db()
     run_migrations(db)
     if not db.execute('SELECT 1 FROM users').fetchone():
-        create_user(db, 'browser-admin', 'browser-fixture-password-123', 'administrator')
+        owner = create_user(db, 'browser-admin', 'browser-fixture-password-123', 'administrator')['id']
         create_user(db, 'browser-viewer', 'browser-fixture-password-123', 'viewer')
         create_user(db, 'browser-operator', 'browser-fixture-password-123', 'operator')
-        request_approval('send_email', {'to':'fixture@example.com','subject':'Browser review fixture','body':'Offline simulation only.'}, db)
+        from orchestrator_core.core.policy import execution_scope
+        with execution_scope('orchestrator', owner=owner):
+            request_approval('send_email', {'to':'fixture@example.com','subject':'Browser review fixture','body':'Offline simulation only.'}, db)
         from datetime import datetime, timedelta, timezone
         with db:
-            db.execute("INSERT INTO conversations(id,title) VALUES ('long-history','Long history fixture')")
+            db.execute("INSERT INTO conversations(id,title,user_id) VALUES ('long-history','Long history fixture',?)", (owner,))
             for index in range(520):
                 timestamp = (datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=index)).isoformat()
-                db.execute("INSERT INTO messages(id,conversation_id,role,content,created_at) VALUES (?,'long-history','assistant',?,?)", (str(index),f'history-message-{index}',timestamp))
+                db.execute("INSERT INTO messages(id,conversation_id,role,content,created_at,user_id) VALUES (?,'long-history','assistant',?,?,?)", (str(index),f'history-message-{index}',timestamp,owner))
     with db:
         db.execute("UPDATE system_flags SET value='on' WHERE key='kill_switch'")
         db.execute('UPDATE schedules SET is_active=0')

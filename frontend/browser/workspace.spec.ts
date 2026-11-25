@@ -152,3 +152,18 @@ test('revoked sessions close live events and return to login', async ({page}) =>
   await expect(page.getByRole('heading',{name:'Welcome back.'})).toBeVisible({timeout:18000});
   await expect(page.getByText('Your session ended. Sign in to continue.')).toBeVisible();
 });
+
+
+test('settings shows personal usage without exposing other accounts', async ({page}) => {
+  await login(page, 'browser-viewer');
+  await page.getByRole('button', {name:'Settings', exact:true}).click();
+  await expect(page.getByRole('heading', {name:'Your plan & usage'})).toBeVisible();
+  await expect(page.getByRole('heading', {name:'Free plan'})).toBeVisible();
+  await expect(page.getByText('Runs today', {exact:true})).toBeVisible();
+  const account = await (await page.request.get('/account')).json();
+  expect(account.usage.runs).toBe(0);
+  expect(account.limits.runs_per_day).toBe(10);
+  expect(account.password_hash).toBeUndefined();
+  expect((await (await page.request.get('/conversations')).json())).toEqual([]);
+  expect((await page.request.get('/conversations/long-history')).status()).toBe(404);
+});
