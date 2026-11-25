@@ -1,5 +1,6 @@
 import { AccountEntry } from './AccountEntry';
 import { useEffect, useRef, useState } from 'react';
+import logoMark from './assets/logo-mark.png';
 import { motion, MotionConfig, useReducedMotion } from 'motion/react';
 import { Boxes, CalendarDays, CheckCheck, FlaskConical, LayoutDashboard, LogOut, MessageSquare, Settings2, Sprout, Workflow } from 'lucide-react';
 import { request, setSession, subscribe } from './api';
@@ -41,7 +42,7 @@ export default function App() {
   }
   if (loading) return <div className="center"><span role="status">Opening your workspace...</span></div>;
   if (!session) return <div className="login-shell">
-    <section className="login-story"><div className="brand"><span className="brand-mark">t.</span> toji<span className="small">WORKSPACE</span></div>
+    <section className="login-story"><div className="brand"><img className="brand-mark" src={logoMark} alt=""/> toji<span className="small">WORKSPACE</span></div>
       <p className="eyebrow">A little structure. More possibility.</p><h1>Make room<br/>for your<br/><em>next idea.</em></h1>
       <p>Your agents, their work, and the decisions that stay yours. All in one considered space.</p>
       <div className="sculpture" aria-hidden="true"><i/><i/><i/><span>YOU ? IDEAS ? ACTION</span></div>
@@ -52,7 +53,7 @@ export default function App() {
   const props = {user: session.user, tick, navigate};
   const content = tab === 'Overview' ? <Overview {...props}/> : tab === 'Chat' ? <Chat {...props}/> : tab === 'Jobs' ? <Jobs {...props}/> : tab === 'Approvals' ? <Approvals {...props}/> : tab === 'Schedules' ? <Schedules {...props}/> : tab === 'Memory' ? <Memories {...props}/> : tab === 'Pipelines' ? <Pipelines {...props}/> : tab === 'Evaluation' ? <Evaluation {...props}/> : <Settings {...props}/>;
   return <MotionConfig reducedMotion="user"><a href="#workspace" className="skip">Skip to workspace</a><div className="app-shell">
-    <aside className="sidebar"><div className="brand"><span className="brand-mark">t.</span> toji<span className="small">WORKSPACE</span></div>
+    <aside className="sidebar"><div className="brand"><img className="brand-mark" src={logoMark} alt=""/> toji<span className="small">WORKSPACE</span></div>
       <div className="workspace-name"><span className="workspace-icon">P</span><div>Personal workspace<small>Shared with your team</small></div></div>
       <p className="nav-label">YOUR WORKSPACE</p><nav aria-label="Main navigation">{navigation.map(([name, Icon]) => <button key={name} onClick={() => navigate(name)} aria-current={tab === name ? 'page' : undefined}><Icon size={18}/>{name}</button>)}</nav>
       <div className="sidebar-bottom"><div className="connection"><span className={status === 'Live' ? 'live-dot' : 'wait-dot'}/>{status} updates</div><div className="account"><span className="avatar">{session.user.username.slice(0, 1).toUpperCase()}</span><div>{session.user.username}<small>{session.user.role}</small></div><button title="Sign out" aria-label="Sign out" onClick={logout}><LogOut size={17}/></button></div></div>
