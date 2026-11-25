@@ -83,6 +83,9 @@ jobs:
       - name: Run focused Phase 2 regressions
         run: python scripts/test_local.py tests/test_phase2_*.py
 
+      - name: Run complete isolated Phase 4 regressions
+        run: python scripts/test_local.py tests
+
       - name: Router Eval CI Gate (Frozen Test Split)
         run: |
           python eval/run_eval.py --dry-run --split test --ci-gate --no-save
