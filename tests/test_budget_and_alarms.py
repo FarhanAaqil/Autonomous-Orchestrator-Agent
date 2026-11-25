@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from orchestrator_core.exceptions import BudgetExceededError
-from orchestrator_core.jobs.events import event_hub
+from datetime import datetime, timezone
 from orchestrator_core.jobs.service import JobService
 from orchestrator_core.runner.caps import check_guards
 from orchestrator_core.runner.loop import run_job
@@ -43,8 +43,8 @@ def test_budget_exceeded_guard_raises_error(budget_db: sqlite3.Connection):
 
     # Insert cost into a prior completed job
     budget_db.execute(
-        "UPDATE jobs SET cost_usd = 2.50 WHERE id = ?",
-        (job.id,),
+        "INSERT INTO provider_usage (id,job_id,used_at,reserved_tokens,reserved_cost,state) VALUES ('prior',?,?,0,2.50,'reserved')",
+        (job.id, datetime.now(timezone.utc).isoformat()),
     )
     budget_db.commit()
 
@@ -65,14 +65,15 @@ def test_budget_alarm_event_and_job_abort_in_loop(budget_db: sqlite3.Connection)
 
     # Pre-populate existing spent budget today
     dummy_job = JobService.create_job(agent="career_agent", goal="prior run", db=budget_db)
-    budget_db.execute("UPDATE jobs SET cost_usd = 1.50 WHERE id = ?", (dummy_job.id,))
+    budget_db.execute("INSERT INTO provider_usage (id,job_id,used_at,reserved_tokens,reserved_cost,state) VALUES ('prior',?,?,0,1.50,'reserved')", (dummy_job.id, datetime.now(timezone.utc).isoformat()))
     budget_db.commit()
 
     # Create new job that attempts to run
     new_job = JobService.create_job(agent="critic_agent", goal="run under exhausted budget", db=budget_db)
 
     # Clear history before run
-    event_hub._history.clear()
+    budget_db.execute("DELETE FROM job_events")
+    budget_db.commit()
 
     # Run the job loop
     final_job = run_job(new_job, db=budget_db, worker_id="budget-worker-1")
@@ -83,7 +84,7 @@ def test_budget_alarm_event_and_job_abort_in_loop(budget_db: sqlite3.Connection)
 
     # Verify alarm event was published to event_hub history
     alarm_events = [
-        msg for eid, msg in event_hub._history if "system.budget_alarm" in msg
+        row[0] for row in budget_db.execute("SELECT data_json FROM job_events WHERE event='system.budget_alarm'").fetchall()
     ]
     assert len(alarm_events) >= 1
     assert new_job.id in alarm_events[0]

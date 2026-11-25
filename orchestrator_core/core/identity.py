@@ -31,7 +31,7 @@ def password_hash(password):
     return hasher.hash(password)
 
 
-def create_user(db, username, password, role='operator', *, bootstrap=False, actor='administrator'):
+def create_user(db, username, password, role='operator', *, bootstrap=False, actor='administrator', verified=True):
     username = username.strip().lower()
     if not username or len(username) > 100 or role not in ('administrator', 'operator', 'viewer'):
         raise ValueError('Invalid username or role')
@@ -41,8 +41,11 @@ def create_user(db, username, password, role='operator', *, bootstrap=False, act
     try:
         if bootstrap and db.execute('SELECT 1 FROM users LIMIT 1').fetchone():
             raise ValueError('Bootstrap is unavailable after the first account exists')
-        db.execute('INSERT INTO users (id,username,password_hash,role,created_at) VALUES (?,?,?,?,?)',
-                   (user_id, username, encoded, role, now().isoformat()))
+        db.execute('INSERT INTO users (id,username,password_hash,role,created_at,email,email_verified_at) VALUES (?,?,?,?,?,?,?)',
+                   (user_id, username, encoded, role, now().isoformat(), username, now().isoformat() if verified else None))
+        if bootstrap:
+            from orchestrator_core.core.ownership import adopt_legacy_rows
+            adopt_legacy_rows(db, user_id)
         log_audit(db, actor, 'account_created', 'user', user_id, {'role': role})
         db.commit()
     except BaseException:
@@ -78,7 +81,7 @@ def login(db, username, password, address):
         valid = hasher.verify(row['password_hash'] if row else _dummy, password)
     except (VerificationError, InvalidHashError):
         valid = False
-    if not valid or not row or not row['active']:
+    if not valid or not row or not row['active'] or not row['email_verified_at']:
         log_audit(db, 'anonymous', 'login_failed', 'authentication', detail={'account_key': keys[0]})
         return None
     token = secrets.token_urlsafe(48)

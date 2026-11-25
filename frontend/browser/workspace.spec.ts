@@ -49,7 +49,7 @@ test('WebGL absence preserves the agent list and keyboard navigation', async ({p
 });
 async function login(page: Page, username = 'browser-admin') {
   await page.goto('/');
-  await page.getByLabel('Username', {exact:true}).fill(username);
+  await page.getByLabel('Email or administrator username', {exact:true}).fill(username);
   await page.getByLabel('Password', {exact:true}).fill('browser-fixture-password-123');
   await page.getByRole('button', {name:'Enter workspace'}).click();
   await expect(page.getByRole('heading', {name:'Hello, ' + username + '.'})).toBeVisible();

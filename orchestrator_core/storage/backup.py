@@ -226,7 +226,7 @@ def create_full_system_snapshot(output_dir: Optional[str | Path] = None) -> dict
             "sha256": chroma_sha256,
             "size_bytes": chroma_backup.stat().st_size,
         },
-        "version": "1.0.0",
+        "version": get_settings().app_version,
         "backup_seconds": time.monotonic() - started,
     }
 

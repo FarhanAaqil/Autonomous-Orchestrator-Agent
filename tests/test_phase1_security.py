@@ -39,7 +39,7 @@ def test_circuit_reset_requires_auth():
 
 
 def test_route_inventory_has_explicit_auth_boundary():
-    public = {"/health", "/ready", "/auth/login", "/", "/ui"}
+    public = {"/health", "/ready", "/auth/login", "/auth/options", "/auth/register", "/auth/verify", "/auth/password/reset/request", "/auth/password/reset/confirm", "/", "/ui"}
     for route in app.routes:
         if isinstance(route, APIRoute) and route.path not in public:
             assert any(d.call is verify_bearer_token for d in route.dependant.dependencies), route.path

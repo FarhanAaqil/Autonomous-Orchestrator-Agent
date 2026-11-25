@@ -177,6 +177,7 @@ class JobRecord(BaseModel):
     """Row shape in the jobs table (persistent work unit)."""
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     thread_id: str
+    user_id: Optional[str] = None
     parent_job_id: Optional[str] = None
     session_id: Optional[str] = None
     schedule_id: Optional[str] = None

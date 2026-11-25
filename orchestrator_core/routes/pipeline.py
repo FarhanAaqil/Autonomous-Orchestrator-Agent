@@ -13,6 +13,7 @@ import sqlite3
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
+from orchestrator_core.core.ownership import request_owner
 from orchestrator_core.storage.db import get_db_connection
 from orchestrator_core.core.pipeline_engine import run_pipeline
 from orchestrator_core.models import PipelineRequest
@@ -35,6 +36,7 @@ def start_pipeline(
     pipeline_name: str,
     body: PipelineRequest,
     db: sqlite3.Connection = Depends(get_db_connection),
+    owner: str | None = Depends(request_owner),
 ):
     """
     Execute a named pipeline synchronously and return the run_id.
@@ -49,5 +51,5 @@ def start_pipeline(
         )
 
     from orchestrator_core.jobs.background import enqueue
-    job_id = enqueue(db, 'pipeline', {'name': pipeline_name, 'command': body.command})
+    job_id = enqueue(db, 'pipeline', {'name': pipeline_name, 'command': body.command}, owner=owner)
     return PipelineStarted(run_id=job_id, job_id=job_id, pipeline_name=pipeline_name, status='queued')

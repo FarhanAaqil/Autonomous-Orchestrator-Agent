@@ -41,8 +41,12 @@ def tick(db, now=None):
             if db.execute('SELECT 1 FROM schedule_occurrences WHERE schedule_id=? AND due_at=?', (row['id'], due)).fetchone():
                 db.execute('UPDATE schedules SET next_run_at=? WHERE id=?', (following, row['id']))
                 continue
-            job = JobService.create_job(row['agent'], row['goal'], db, schedule_id=row['id'])
-            db.execute('INSERT INTO schedule_occurrences VALUES (?,?,?)', (row['id'], due, job.id))
+            from orchestrator_core.core.plans import PlanLimitExceeded
+            try:
+                job = JobService.create_job(row['agent'], row['goal'], db, schedule_id=row['id'], owner=row['user_id'])
+            except PlanLimitExceeded:
+                continue  # One account at its quota cannot block other schedules.
+            db.execute('INSERT INTO schedule_occurrences (schedule_id,due_at,job_id,user_id) VALUES (?,?,?,?)', (row['id'], due, job.id, row['user_id']))
             db.execute('UPDATE schedules SET last_run_at=?,next_run_at=? WHERE id=?', (now.isoformat(), following, row['id']))
             queued.append(job.id)
     with transaction(db):

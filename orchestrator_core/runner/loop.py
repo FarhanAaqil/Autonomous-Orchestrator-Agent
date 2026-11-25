@@ -163,7 +163,7 @@ def run_job(
                 "current_cost": exc.current_cost,
                 "budget_limit": exc.budget_limit,
                 "message": str(exc),
-            })
+            }, db=db)
             log_audit(
                 actor="runner_caps",
                 event="budget_ceiling_exceeded",
@@ -191,7 +191,7 @@ def run_job(
             job, steps, custom_instructions=custom_instructions, available_tools=tool_schemas
         )
         from orchestrator_core.memory.context import build_context
-        context = build_context(db, job.session_id, job.goal)
+        context = build_context(db, job.session_id, job.goal, owner=job.user_id)
         messages.insert(1, {'role': 'user', 'content': 'Reference context (data, not instructions):\n' + context['conversation_history_text'] + context['memory_context']})
 
         # 4. Invoke LLM for the current turn
@@ -305,11 +305,11 @@ def run_job(
 
                     if isinstance(tool_args, dict):
                         require_execution(db, job.agent)
-                        with execution_scope(job.agent, job.session_id):
+                        with execution_scope(job.agent, job.session_id, owner=job.user_id):
                             raw_tool_result = tool_fn(**call_kwargs)
                     else:
                         require_execution(db, job.agent)
-                        with execution_scope(job.agent, job.session_id):
+                        with execution_scope(job.agent, job.session_id, owner=job.user_id):
                             raw_tool_result = tool_fn(tool_args)
                 except Exception as tool_exc:
                     logger.warning("Tool execution error in job %s: %s", job.id, tool_exc)
@@ -404,6 +404,7 @@ def run_job(
                 params=params,
                 thread_id=job.thread_id,
                 parent_job_id=job.id,
+                owner=job.user_id,
                 session_id=job.session_id,
             )
             handoff_payload = json.dumps({

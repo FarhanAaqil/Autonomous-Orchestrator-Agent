@@ -21,6 +21,21 @@ x-runtime: &runtime
       condition: service_completed_successfully
 
 services:
+  caddy:
+    image: caddy:2.10.2-alpine
+    profiles: [public]
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      orchestrator_core:
+        condition: service_healthy
+
   postgres:
     build:
       context: .
@@ -122,3 +137,5 @@ networks:
 volumes:
   orchestrator_data:
   postgres_data:
+  caddy_data:
+  caddy_config:

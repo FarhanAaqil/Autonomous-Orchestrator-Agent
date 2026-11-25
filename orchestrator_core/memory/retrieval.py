@@ -34,6 +34,7 @@ def get_context_slice(
     token_budget: int = DEFAULT_TOKEN_BUDGET,
     chroma_client: Optional[Any] = None,
     include_pending: bool = False,
+    owner: Optional[str] = None,
 ) -> str:
     """
     Retrieve ranked semantic and episodic memories matching query within token_budget.
@@ -47,7 +48,7 @@ def get_context_slice(
     # 1. Vector similarity search in ChromaDB (memory collection)
     try:
         coll = get_agent_collection("memory", client=chroma_client)
-        res = coll.query(query_texts=[query], n_results=5)
+        res = coll.query(query_texts=[query], n_results=5, where={"user_id": owner or ""})
         if res and res.get("ids") and res["ids"][0]:
             for item_id, doc in zip(res["ids"][0], res["documents"][0]):
                 matched_items[item_id] = {"doc": doc, "score": 1}
@@ -57,7 +58,7 @@ def get_context_slice(
     # 2. Vector similarity search in ChromaDB (episodes collection)
     try:
         ep_coll = get_agent_collection("episodes", client=chroma_client)
-        ep_res = ep_coll.query(query_texts=[query], n_results=3)
+        ep_res = ep_coll.query(query_texts=[query], n_results=3, where={"user_id": owner or ""})
         if ep_res and ep_res.get("ids") and ep_res["ids"][0]:
             for item_id, doc in zip(ep_res["ids"][0], ep_res["documents"][0]):
                 if item_id not in matched_items:
@@ -72,10 +73,10 @@ def get_context_slice(
         f"""
         SELECT id, kind, key, value, created_at
         FROM memory_items
-        WHERE deleted = 0 {pending_clause}
+        WHERE deleted = 0 AND COALESCE(user_id,'')=? {pending_clause}
         ORDER BY updated_at DESC
         LIMIT 10
-        """
+        """, (owner or "",)
     ).fetchall()
 
     for r in rows:
@@ -95,9 +96,9 @@ def get_context_slice(
         f"""
         SELECT id, kind, key, value, pending_review, deleted, created_at
         FROM memory_items
-        WHERE id IN ({placeholders}) AND deleted = 0 {pending_clause}
+        WHERE id IN ({placeholders}) AND deleted = 0 AND COALESCE(user_id,'')=? {pending_clause}
         """,
-        list(matched_items.keys()),
+        list(matched_items.keys()) + [owner or ""],
     ).fetchall()
 
     for r in check_rows:

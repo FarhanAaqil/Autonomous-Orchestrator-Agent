@@ -31,7 +31,7 @@ def test_sdk_imports_restricted_to_approval_gate():
     violations = []
 
     for py_file in _get_python_files(ORCHESTRATOR_CORE_DIR):
-        if py_file.name == ALLOWED_SDK_EXECUTOR_FILE:
+        if py_file.relative_to(ORCHESTRATOR_CORE_DIR).as_posix() == 'core/approval_gate.py':
             continue
 
         try:
@@ -44,13 +44,13 @@ def test_sdk_imports_restricted_to_approval_gate():
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     root_pkg = alias.name.split(".")[0]
-                    if root_pkg in FORBIDDEN_SDK_MODULES:
+                    if root_pkg in FORBIDDEN_SDK_MODULES and not (root_pkg == 'smtplib' and py_file.relative_to(ORCHESTRATOR_CORE_DIR).as_posix() == 'core/mailer.py'):
                         violations.append(f"{py_file.relative_to(ORCHESTRATOR_CORE_DIR.parent)}:{node.lineno} imports {alias.name}")
             # Check `from smtplib import ...`
             elif isinstance(node, ast.ImportFrom):
                 if node.module:
                     root_pkg = node.module.split(".")[0]
-                    if root_pkg in FORBIDDEN_SDK_MODULES:
+                    if root_pkg in FORBIDDEN_SDK_MODULES and not (root_pkg == 'smtplib' and py_file.relative_to(ORCHESTRATOR_CORE_DIR).as_posix() == 'core/mailer.py'):
                         violations.append(f"{py_file.relative_to(ORCHESTRATOR_CORE_DIR.parent)}:{node.lineno} imports from {node.module}")
 
     assert not violations, (
@@ -90,3 +90,15 @@ def test_agent_modules_do_not_expose_direct_execution_tools():
         f"AGENT TOOL LEAKAGE DETECTED! Agents must never directly execute side-effects:\n"
         + "\n".join(violations)
     )
+
+
+def test_account_mail_transport_is_not_available_to_agents_or_tools():
+    for folder in ('agents', 'tools', 'runner'):
+        for path in _get_python_files(ORCHESTRATOR_CORE_DIR / folder):
+            tree = ast.parse(path.read_text(encoding='utf-8-sig'))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom):
+                    assert 'mailer' not in (node.module or ''), path
+                    assert all(alias.name not in ('mailer', 'send_account_link') for alias in node.names), path
+                elif isinstance(node, ast.Import):
+                    assert all('mailer' not in alias.name for alias in node.names), path

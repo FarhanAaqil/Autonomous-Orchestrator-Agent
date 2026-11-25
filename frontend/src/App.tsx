@@ -1,6 +1,7 @@
+import { AccountEntry } from './AccountEntry';
 import { useEffect, useRef, useState } from 'react';
 import { motion, MotionConfig, useReducedMotion } from 'motion/react';
-import { ArrowUpRight, Boxes, CalendarDays, CheckCheck, CircleHelp, FlaskConical, LayoutDashboard, LogOut, MessageSquare, Settings2, Sprout, Workflow } from 'lucide-react';
+import { Boxes, CalendarDays, CheckCheck, FlaskConical, LayoutDashboard, LogOut, MessageSquare, Settings2, Sprout, Workflow } from 'lucide-react';
 import { request, setSession, subscribe } from './api';
 import type { Session } from './api';
 import { Banner } from './ui';
@@ -38,7 +39,6 @@ export default function App() {
     try {await request('/auth/logout', 'POST'); setSession(null); updateSession(null); setTab('Overview'); setError('');}
     catch {setError('Could not sign out. Please retry while connected.');}
   }
-  const [signingIn, setSigningIn] = useState(false);
   if (loading) return <div className="center"><span role="status">Opening your workspace...</span></div>;
   if (!session) return <div className="login-shell">
     <section className="login-story"><div className="brand"><span className="brand-mark">t.</span> toji<span className="small">WORKSPACE</span></div>
@@ -47,18 +47,7 @@ export default function App() {
       <div className="sculpture" aria-hidden="true"><i/><i/><i/><span>YOU ? IDEAS ? ACTION</span></div>
       <p className="small">Thoughtful automation. Human direction.</p>
     </section>
-    <section className="login-panel"><span className="kicker">YOUR PERSONAL CONTROL ROOM</span><h2>Welcome back.</h2><p>Sign in to pick up where you left off.</p>
-      <Banner error={error}/>
-      <form onSubmit={async e => {e.preventDefault(); const f = new FormData(e.currentTarget); setSigningIn(true); setError('');
-        try {signedIn(await request<Session>('/auth/login', 'POST', {username: f.get('username'), password: f.get('password')}));}
-        catch {setError('Unable to sign in. Check your credentials or wait a few minutes before retrying.');}
-        finally {setSigningIn(false);}
-      }}>
-        <label>Username<input name="username" autoComplete="username" required autoFocus maxLength={100}/></label>
-        <label>Password<input name="password" type="password" autoComplete="current-password" required maxLength={1024}/></label>
-        <button className="primary" disabled={signingIn}>{signingIn ? 'Signing in...' : 'Enter workspace'}<ArrowUpRight size={18}/></button>
-      </form><p className="small"><CircleHelp size={14}/> Accounts are managed by your workspace administrator.</p>
-    </section>
+    <AccountEntry signedIn={signedIn} initialError={error}/>
   </div>;
   const props = {user: session.user, tick, navigate};
   const content = tab === 'Overview' ? <Overview {...props}/> : tab === 'Chat' ? <Chat {...props}/> : tab === 'Jobs' ? <Jobs {...props}/> : tab === 'Approvals' ? <Approvals {...props}/> : tab === 'Schedules' ? <Schedules {...props}/> : tab === 'Memory' ? <Memories {...props}/> : tab === 'Pipelines' ? <Pipelines {...props}/> : tab === 'Evaluation' ? <Evaluation {...props}/> : <Settings {...props}/>;

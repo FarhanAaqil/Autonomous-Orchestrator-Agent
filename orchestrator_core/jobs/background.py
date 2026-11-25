@@ -6,12 +6,12 @@ from orchestrator_core.jobs.leases import fenced_runner, require_lease
 from orchestrator_core.storage.transactions import transaction
 
 
-def enqueue(db, kind, payload):
+def enqueue(db, kind, payload, owner=None):
     if kind not in ('pipeline', 'evaluation'):
         raise ValueError('Unsupported background work')
     agent = {'research': 'research_agent', 'apply': 'career_agent', 'publish': 'growth_content_agent'}.get(payload.get('name'), 'general_chat')
     with transaction(db):
-        job = JobService.create_job(agent, payload.get('command') or 'Evaluate router', db)
+        job = JobService.create_job(agent, payload.get('command') or 'Evaluate router', db, owner=owner)
         db.execute('UPDATE jobs SET work_kind=?,work_payload_json=? WHERE id=?', (kind, json.dumps(payload), job.id))
     return job.id
 
@@ -25,10 +25,10 @@ def run_background_job(job, db, worker_id='worker-1', **unused):
     try:
         if job.work_kind == 'pipeline':
             from orchestrator_core.core.pipeline_engine import run_pipeline
-            result = {'run_id': run_pipeline(payload['name'], PipelineRequest(command=payload['command']), db)}
+            result = {'run_id': run_pipeline(payload['name'], PipelineRequest(command=payload['command']), db, owner=job.user_id)}
         elif job.work_kind == 'evaluation':
             from orchestrator_core.routes.router_eval import evaluate
-            result = evaluate(job.id, db)
+            result = evaluate(job.id, db, owner=job.user_id)
         else:
             raise ValueError('Unknown background work kind')
         with transaction(db):

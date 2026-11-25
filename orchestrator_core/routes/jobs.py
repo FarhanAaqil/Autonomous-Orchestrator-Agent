@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, status, Re
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from orchestrator_core.core.ownership import request_owner, require_owned_job
 from orchestrator_core.dependencies import verify_bearer_token
 from orchestrator_core.exceptions import (
     InvalidJobStateTransitionError,
@@ -58,6 +59,7 @@ def list_jobs(
     offset: int = Query(default=0, ge=0),
     db: sqlite3.Connection = Depends(get_db_connection),
     _token: Optional[str] = Depends(verify_bearer_token),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """List jobs with optional filters and pagination."""
     items, total = JobService.list_jobs(
@@ -68,6 +70,7 @@ def list_jobs(
         session_id=session_id,
         limit=limit,
         offset=offset,
+        owner=owner,
     )
     return JobListResponse(items=items, total=total, limit=limit, offset=offset)
 
@@ -77,8 +80,12 @@ def create_job(
     request: JobCreateRequest,
     db: sqlite3.Connection = Depends(get_db_connection),
     _token: Optional[str] = Depends(verify_bearer_token),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """Create and enqueue a new autonomous job."""
+    for table, reference in (('jobs', request.parent_job_id), ('conversations', request.session_id)):
+        if reference and not db.execute(f"SELECT id FROM {table} WHERE id=? AND COALESCE(user_id,'')=?", (reference, owner or '')).fetchone():
+            raise HTTPException(404, 'Job source not found')
     return JobService.create_job(
         agent=request.agent,
         goal=request.goal,
@@ -90,6 +97,7 @@ def create_job(
         priority=request.priority,
         max_steps=request.max_steps,
         token_budget=request.token_budget,
+        owner=owner,
     )
 
 
@@ -99,6 +107,7 @@ def stream_job_events(
     last_event_id: Optional[str] = Header(default=None, alias="Last-Event-ID"),
     last_event_id_query: Optional[str] = Query(default=None, alias="last_event_id"),
     _token: Optional[str] = Depends(verify_bearer_token),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """
     SSE stream of real-time job state transitions, steps, and system notifications.
@@ -106,7 +115,7 @@ def stream_job_events(
     """
     effective_id = last_event_id or last_event_id_query
     return StreamingResponse(
-        event_hub.subscribe(last_event_id=effective_id, session_token=request.cookies.get('orchestrator_session')),
+        event_hub.subscribe(last_event_id=effective_id, session_token=request.cookies.get('orchestrator_session'), owner=owner),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -121,8 +130,10 @@ def get_job(
     job_id: str,
     db: sqlite3.Connection = Depends(get_db_connection),
     _token: Optional[str] = Depends(verify_bearer_token),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """Fetch an autonomous job record by ID."""
+    require_owned_job(db, job_id, owner)
     job = JobService.get_job(job_id, db)
     if job is None:
         raise HTTPException(
@@ -137,8 +148,10 @@ def get_job_steps(
     job_id: str,
     db: sqlite3.Connection = Depends(get_db_connection),
     _token: Optional[str] = Depends(verify_bearer_token),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """Fetch chronological execution trace of steps for a job."""
+    require_owned_job(db, job_id, owner)
     job = JobService.get_job(job_id, db)
     if job is None:
         raise HTTPException(
@@ -153,8 +166,10 @@ def cancel_job(
     job_id: str,
     db: sqlite3.Connection = Depends(get_db_connection),
     _token: Optional[str] = Depends(verify_bearer_token),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """Cancel a queued or running job."""
+    require_owned_job(db, job_id, owner)
     try:
         return JobService.cancel_job(job_id, db)
     except JobNotFoundError:
@@ -175,8 +190,10 @@ def answer_job_question(
     request: JobAnswerRequest,
     db: sqlite3.Connection = Depends(get_db_connection),
     _token: Optional[str] = Depends(verify_bearer_token),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """Answer an awaiting_input question and requeue the job."""
+    require_owned_job(db, job_id, owner)
     try:
         return JobService.answer_input(job_id, answer=request.answer, data=request.data, db=db)
     except JobNotFoundError:

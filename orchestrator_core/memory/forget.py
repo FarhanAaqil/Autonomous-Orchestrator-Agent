@@ -25,6 +25,7 @@ def forget(
     db: sqlite3.Connection,
     chroma_client: Optional[Any] = None,
     purge_vector: bool = True,
+    owner: Optional[str] = None,
 ) -> bool:
     """
     Delete a memory item from SQLite and purge from vector storage.
@@ -37,9 +38,9 @@ def forget(
             """
             UPDATE memory_items
             SET deleted = 1, updated_at = ?
-            WHERE id = ? AND deleted = 0
+            WHERE id = ? AND deleted = 0 AND COALESCE(user_id,'')=?
             """,
-            (now_iso, item_id),
+            (now_iso, item_id, owner or ""),
         )
 
     if cursor.rowcount == 0:

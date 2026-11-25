@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from orchestrator_core.storage.db import get_db_connection
+from orchestrator_core.core.ownership import request_owner
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/conversations", tags=["Conversations"])
@@ -47,16 +48,18 @@ def list_conversations(
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     db: sqlite3.Connection = Depends(get_db_connection),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """List all conversations ordered by last updated."""
     query = """
         SELECT c.id, c.title, c.created_at, c.updated_at,
                (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) as message_count
         FROM conversations c
+        WHERE COALESCE(c.user_id,'') = ?
         ORDER BY c.updated_at DESC
         LIMIT ? OFFSET ?
     """
-    rows = db.execute(query, (limit, offset)).fetchall()
+    rows = db.execute(query, (owner or '', limit, offset)).fetchall()
     return [
         ConversationResponse(
             id=row["id"],
@@ -73,6 +76,7 @@ def list_conversations(
 def create_conversation(
     body: Optional[ConversationCreate] = None,
     db: sqlite3.Connection = Depends(get_db_connection),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """Create a new conversation session."""
     cid = str(uuid.uuid4())
@@ -81,8 +85,8 @@ def create_conversation(
 
     with db:
         db.execute(
-            "INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
-            (cid, title, now, now),
+            "INSERT INTO conversations (id, title, created_at, updated_at, user_id) VALUES (?, ?, ?, ?, ?)",
+            (cid, title, now, now, owner),
         )
 
     return ConversationResponse(
@@ -98,6 +102,7 @@ def create_conversation(
 def get_conversation(
     conversation_id: str,
     db: sqlite3.Connection = Depends(get_db_connection),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """Get conversation metadata by ID."""
     row = db.execute(
@@ -105,9 +110,9 @@ def get_conversation(
         SELECT c.id, c.title, c.created_at, c.updated_at,
                (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) as message_count
         FROM conversations c
-        WHERE c.id = ?
+        WHERE c.id = ? AND COALESCE(c.user_id,'') = ?
         """,
-        (conversation_id,),
+        (conversation_id, owner or ''),
     ).fetchone()
 
     if not row:
@@ -128,10 +133,11 @@ def get_conversation_messages(
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     db: sqlite3.Connection = Depends(get_db_connection),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """Retrieve message history for a conversation thread in chronological order."""
     # Verify conversation exists
-    c = db.execute("SELECT id FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
+    c = db.execute("SELECT id FROM conversations WHERE id = ? AND COALESCE(user_id,'') = ?", (conversation_id, owner or '')).fetchone()
     if not c:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Conversation '{conversation_id}' not found")
 
@@ -139,11 +145,11 @@ def get_conversation_messages(
         """
         SELECT id, conversation_id, role, content, agent, created_at
         FROM messages
-        WHERE conversation_id = ?
+        WHERE conversation_id = ? AND COALESCE(user_id,'') = ?
         ORDER BY created_at DESC, id DESC
         LIMIT ? OFFSET ?
         """,
-        (conversation_id, limit, offset),
+        (conversation_id, owner or '', limit, offset),
     ).fetchall()
     rows.reverse()
 
@@ -164,9 +170,10 @@ def get_conversation_messages(
 def delete_conversation(
     conversation_id: str,
     db: sqlite3.Connection = Depends(get_db_connection),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """Delete a conversation thread and all its messages."""
-    row = db.execute("SELECT id FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
+    row = db.execute("SELECT id FROM conversations WHERE id = ? AND COALESCE(user_id,'') = ?", (conversation_id, owner or '')).fetchone()
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Conversation '{conversation_id}' not found")
 

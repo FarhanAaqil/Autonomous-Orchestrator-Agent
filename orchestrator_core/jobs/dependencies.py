@@ -7,9 +7,16 @@ from orchestrator_core.storage.db import log_audit
 
 
 def attach(db, job_id, kind, target_id):
-    db.execute('INSERT INTO job_dependencies (id,job_id,kind,target_id) VALUES (?,?,?,?) '
+    if kind not in ('approval', 'child'):
+        raise ValueError('Unknown dependency kind')
+    table = 'approvals' if kind == 'approval' else 'jobs'
+    parent = db.execute('SELECT user_id FROM jobs WHERE id=?', (job_id,)).fetchone()
+    target = db.execute(f'SELECT user_id FROM {table} WHERE id=?', (target_id,)).fetchone()
+    if not parent or not target or parent['user_id'] != target['user_id']:
+        raise ValueError('Dependency source not found')
+    db.execute('INSERT INTO job_dependencies (id,job_id,kind,target_id,user_id) VALUES (?,?,?,?,?) '
                'ON CONFLICT(job_id,kind,target_id) DO NOTHING',
-               (str(uuid.uuid4()), job_id, kind, target_id))
+               (str(uuid.uuid4()), job_id, kind, target_id, parent['user_id']))
 
 
 def reconcile(db):
@@ -18,7 +25,7 @@ def reconcile(db):
     for dependency in pending:
         table = 'approvals' if dependency['kind'] == 'approval' else 'jobs'
         result = db.execute(f'SELECT * FROM {table} WHERE id=?', (dependency['target_id'],)).fetchone()
-        if not result:
+        if not result or result['user_id'] != dependency['user_id']:
             continue
         status = result['status']
         success = status in ('simulated', 'submitted', 'confirmed', 'succeeded')
@@ -39,7 +46,7 @@ def reconcile(db):
         db.execute('BEGIN IMMEDIATE')
         try:
             job = db.execute('SELECT * FROM jobs WHERE id=?', (dependency['job_id'],)).fetchone()
-            if not job or job['status'] not in ('awaiting_approval', 'awaiting_input'):
+            if not job or job['user_id'] != dependency['user_id'] or job['status'] not in ('awaiting_approval', 'awaiting_input'):
                 db.rollback()
                 continue
             cur = db.execute('UPDATE job_dependencies SET resolved=1,outcome_json=? WHERE id=? AND resolved=0', (encoded, dependency['id']))
@@ -51,8 +58,8 @@ def reconcile(db):
                        'error=?,finished_at=? WHERE id=?',
                        (state, None if success else 'Dependency outcome: '+status, timestamp if failure else None, job['id']))
             idx = db.execute('SELECT COALESCE(MAX(idx),-1)+1 FROM job_steps WHERE job_id=?', (job['id'],)).fetchone()[0]
-            db.execute('INSERT INTO job_steps (id,job_id,idx,kind,name,output_json,created_at) VALUES (?,?,?,\'note\',\'dependency_result\',?,?)',
-                       ('dependency:'+dependency['id'], job['id'], idx, encoded, timestamp))
+            db.execute('INSERT INTO job_steps (id,job_id,idx,kind,name,output_json,created_at,user_id) VALUES (?,?,?,\'note\',\'dependency_result\',?,?,?)',
+                       ('dependency:'+dependency['id'], job['id'], idx, encoded, timestamp, job['user_id']))
             db.execute('UPDATE jobs SET step_count=step_count+1 WHERE id=?', (job['id'],))
             log_audit(db, 'dependency_resolver', 'dependency_resolved', 'job', job['id'], observation)
             db.commit()

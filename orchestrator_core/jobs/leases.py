@@ -39,6 +39,8 @@ def fenced_runner(fn):
             if job is None:
                 raise JobClaimConflictError(bound.arguments['job'].id)
             bound.arguments['job'] = job
+        from orchestrator_core.core.ownership import execution_owner
+        owner_marker = execution_owner.set(job.user_id)
         marker = current_lease.set((job.id, worker, job.lease_generation))
         from orchestrator_core.core.usage import usage_db
         usage_marker = usage_db.set(db)
@@ -57,4 +59,5 @@ def fenced_runner(fn):
         finally:
             usage_db.reset(usage_marker)
             current_lease.reset(marker)
+            execution_owner.reset(owner_marker)
     return run

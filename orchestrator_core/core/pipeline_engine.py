@@ -25,7 +25,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from orchestrator_core.models import PipelineRequest
-from orchestrator_core.core.policy import require_execution, run_handler
+from orchestrator_core.core.policy import require_execution, run_handler, execution_scope
+from orchestrator_core.core.ownership import execution_owner
 from orchestrator_core.storage.transactions import fenced_transaction
 
 logger = logging.getLogger(__name__)
@@ -47,8 +48,8 @@ def _write_step(
         db.execute(
             """
             INSERT INTO pipeline_steps
-                (run_id, step_number, agent_name, input_json, output_json, latency_ms, success, timestamp, error)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (run_id, step_number, agent_name, input_json, output_json, latency_ms, success, timestamp, error, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 run_id,
@@ -60,6 +61,7 @@ def _write_step(
                 int(success),
                 datetime.now(timezone.utc).isoformat(),
                 error,
+                execution_owner.get(),
             ),
         )
 
@@ -75,7 +77,7 @@ def _run_step(
     """Execute one agent step, record it, and return the result dict."""
     t0 = time.monotonic()
     try:
-        result = run_handler(handler, command, db, agent_name, {"run_id": run_id, "step": step_number})
+        result = run_handler(handler, command, db, agent_name, {"run_id": run_id, "step": step_number}, owner=execution_owner.get())
         latency_ms = int((time.monotonic() - t0) * 1000)
         _write_step(db, run_id, step_number, agent_name, {"command": command},
                     {"output": result.output, "metadata": result.metadata},
@@ -88,7 +90,7 @@ def _run_step(
         raise
 
 
-def run_pipeline(
+def _run_pipeline(
     pipeline_name: str,
     request: PipelineRequest,
     db: sqlite3.Connection,
@@ -109,10 +111,10 @@ def run_pipeline(
     with fenced_transaction(db):
         db.execute(
             """
-            INSERT INTO pipeline_runs (run_id, pipeline_name, command, status, started_at)
-            VALUES (?, ?, ?, 'running', ?)
+            INSERT INTO pipeline_runs (run_id, pipeline_name, command, status, started_at, user_id)
+            VALUES (?, ?, ?, 'running', ?, ?)
             """,
-            (run_id, pipeline_name, request.command, started_at),
+            (run_id, pipeline_name, request.command, started_at, execution_owner.get()),
         )
 
     logger.info("Pipeline start — run_id=%s name=%s command=%.60s", run_id, pipeline_name, request.command)
@@ -175,3 +177,8 @@ def run_pipeline(
         raise
 
     return run_id
+
+
+def run_pipeline(pipeline_name, request, db, owner=None):
+    with execution_scope('orchestrator', owner=owner):
+        return _run_pipeline(pipeline_name, request, db)

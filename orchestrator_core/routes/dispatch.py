@@ -30,6 +30,7 @@ from orchestrator_core.models import (
     RouterResult,
     canonical_agent_name,
 )
+from orchestrator_core.core.ownership import request_owner, conversation_for_owner
 from orchestrator_core.storage.db import get_db, get_db_connection
 
 logger = logging.getLogger(__name__)
@@ -61,7 +62,7 @@ def _get_agent_registry() -> dict:
     }
 
 
-def _handle_operational_command(command: str, db: sqlite3.Connection, conversation_id: str) -> Optional[AgentResult]:
+def _handle_operational_command(command: str, db: sqlite3.Connection, conversation_id: str, owner=None) -> Optional[AgentResult]:
     lower = command.lower().strip()
     if lower in ('kill switch on', 'enable kill switch', 'activate kill switch',
                  'kill switch off', 'disable kill switch', 'deactivate kill switch'):
@@ -82,7 +83,7 @@ def _handle_operational_command(command: str, db: sqlite3.Connection, conversati
 
         try:
             req = PipelineRequest(command=command)
-            run_id = run_pipeline(p_name, req, db)
+            run_id = run_pipeline(p_name, req, db, owner=owner)
 
             steps = db.execute(
                 "SELECT step_number, agent_name, latency_ms, success, output_json, error FROM pipeline_steps WHERE run_id = ? ORDER BY step_number ASC",
@@ -90,8 +91,8 @@ def _handle_operational_command(command: str, db: sqlite3.Connection, conversati
             ).fetchall()
 
             app_row = db.execute(
-                "SELECT id, action_type, payload_json FROM approvals WHERE payload_json LIKE ? ORDER BY created_at DESC LIMIT 1",
-                (f"%{run_id}%",),
+                "SELECT id, action_type, payload_json FROM approvals WHERE payload_json LIKE ? AND COALESCE(user_id,'')=? ORDER BY created_at DESC LIMIT 1",
+                (f"%{run_id}%", owner or ""),
             ).fetchone()
             approval_id = app_row["id"] if app_row else None
 
@@ -145,7 +146,7 @@ def _handle_operational_command(command: str, db: sqlite3.Connection, conversati
     # 2. Approvals - List
     if lower in ("show approvals", "pending approvals", "list approvals", "approvals", "view approvals"):
         rows = db.execute(
-            "SELECT id, action_type, status, payload_json, created_at FROM approvals WHERE status = 'pending' ORDER BY created_at DESC LIMIT 10"
+            "SELECT id, action_type, status, payload_json, created_at FROM approvals WHERE status = 'pending' AND COALESCE(user_id,'')=? ORDER BY created_at DESC LIMIT 10", (owner or '',)
         ).fetchall()
         if not rows:
             output = "🛡️ **Approval Gate Clean**: No actions currently pending human review.\n\nAll requested actions have been authorized and executed or rejected."
@@ -180,11 +181,11 @@ def _handle_operational_command(command: str, db: sqlite3.Connection, conversati
 
     # 5. Quick Status
     if lower in ("quick status", "system status", "status", "cluster status"):
-        pending_appr = db.execute("SELECT COUNT(*) FROM approvals WHERE status = 'pending'").fetchone()[0]
-        total_jobs = db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
-        succ_jobs = db.execute("SELECT COUNT(*) FROM jobs WHERE status = 'succeeded'").fetchone()[0]
-        running_jobs = db.execute("SELECT COUNT(*) FROM jobs WHERE status IN ('running', 'queued')").fetchone()[0]
-        scheds = db.execute("SELECT COUNT(*) FROM schedules WHERE is_active = 1").fetchone()[0]
+        pending_appr = db.execute("SELECT COUNT(*) FROM approvals WHERE status = 'pending' AND COALESCE(user_id,'')=?", (owner or "",)).fetchone()[0]
+        total_jobs = db.execute("SELECT COUNT(*) FROM jobs WHERE COALESCE(user_id,'')=?", (owner or "",)).fetchone()[0]
+        succ_jobs = db.execute("SELECT COUNT(*) FROM jobs WHERE status = 'succeeded' AND COALESCE(user_id,'')=?", (owner or "",)).fetchone()[0]
+        running_jobs = db.execute("SELECT COUNT(*) FROM jobs WHERE status IN ('running', 'queued') AND COALESCE(user_id,'')=?", (owner or "",)).fetchone()[0]
+        scheds = db.execute("SELECT COUNT(*) FROM schedules WHERE is_active = 1 AND COALESCE(user_id,'')=?", (owner or "",)).fetchone()[0]
         ks_row = db.execute("SELECT value FROM system_flags WHERE key = 'kill_switch'").fetchone()
         ks_val = ks_row["value"].strip().lower() if ks_row else "off"
         ks_status = "🔴 ACTIVE (HALTED)" if ks_val in ("on", "1", "true") else "🟢 INACTIVE (NORMAL)"
@@ -208,8 +209,8 @@ def _handle_operational_command(command: str, db: sqlite3.Connection, conversati
         date_str = now_dt.strftime("%A, %B %d, %Y")
         time_str = now_dt.strftime("%I:%M %p")
 
-        pending_appr = db.execute("SELECT COUNT(*) FROM approvals WHERE status = 'pending'").fetchone()[0]
-        jobs_summary = db.execute("SELECT id, goal, status FROM jobs ORDER BY created_at DESC LIMIT 3").fetchall()
+        pending_appr = db.execute("SELECT COUNT(*) FROM approvals WHERE status = 'pending' AND COALESCE(user_id,'')=?", (owner or "",)).fetchone()[0]
+        jobs_summary = db.execute("SELECT id, goal, status FROM jobs WHERE COALESCE(user_id,'')=? ORDER BY created_at DESC LIMIT 3", (owner or "",)).fetchall()
 
         job_lines = [f"- **#{j['id'][:8]}**: {j['goal']} (`{j['status']}`)" for j in jobs_summary]
         jobs_text = "\n".join(job_lines) if job_lines else "- No immediate active jobs. Fleet is idle and ready."
@@ -254,7 +255,7 @@ def _handle_operational_command(command: str, db: sqlite3.Connection, conversati
 
     # 8. Tasks & Jobs
     if lower in ("show tasks", "list tasks", "all tasks", "tasks", "my tasks"):
-        jobs = db.execute("SELECT id, agent, goal, status, created_at FROM jobs ORDER BY created_at DESC LIMIT 10").fetchall()
+        jobs = db.execute("SELECT id, agent, goal, status, created_at FROM jobs WHERE COALESCE(user_id,'')=? ORDER BY created_at DESC LIMIT 10", (owner or "",)).fetchall()
         if not jobs:
             output = "📋 **No Recorded Tasks**: The autonomous job queue is empty. You can add one by typing `add task: <goal>`."
         else:
@@ -271,17 +272,8 @@ def _handle_operational_command(command: str, db: sqlite3.Connection, conversati
     if lower.startswith("add task:"):
         desc = command.split(":", 1)[1].strip()
         from orchestrator_core.jobs.service import JobService
-        try:
-            job = JobService.create_job(agent="info_agent", goal=desc, db=db, priority=1)
-            job_id = job.id
-        except Exception:
-            job_id = str(uuid.uuid4())
-            now_iso = datetime.now(timezone.utc).isoformat()
-            with db:
-                db.execute(
-                    "INSERT INTO jobs (id, thread_id, agent, goal, status, priority, created_at) VALUES (?, ?, 'info_agent', ?, 'queued', 1, ?)",
-                    (job_id, job_id, desc, now_iso),
-                )
+        job = JobService.create_job(agent="info_agent", goal=desc, db=db, priority=1, owner=owner, session_id=conversation_id)
+        job_id = job.id
         output = (
             f"✅ **Task Successfully Created & Queued**\n\n"
             f"- **Task ID**: `#{job_id[:8]}`\n"
@@ -322,6 +314,7 @@ class DispatchRequest(BaseModel):
 def dispatch_command(
     body: DispatchRequest,
     db: sqlite3.Connection = Depends(get_db_connection),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """
     Classify and immediately execute a command within a persistent conversation thread.
@@ -329,44 +322,44 @@ def dispatch_command(
     """
     require_execution(db)
     t_start = time.monotonic()
-    logger.info("Dispatching command: %.80s", body.command)
+    logger.info("Dispatching authenticated request")
     now = datetime.now(timezone.utc).isoformat()
 
     # 1. Resolve or create conversation session
     cid = body.conversation_id
     if cid:
-        row = db.execute("SELECT id FROM conversations WHERE id = ?", (cid,)).fetchone()
+        row = conversation_for_owner(db, cid, owner)
         if not row:
             title = body.command[:40] + ("..." if len(body.command) > 40 else "")
             with db:
                 db.execute(
-                    "INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
-                    (cid, title, now, now),
+                    "INSERT INTO conversations (id, title, created_at, updated_at, user_id) VALUES (?, ?, ?, ?, ?)",
+                    (cid, title, now, now, owner),
                 )
     else:
         cid = str(uuid.uuid4())
         title = body.command[:40] + ("..." if len(body.command) > 40 else "")
         with db:
             db.execute(
-                "INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
-                (cid, title, now, now),
+                "INSERT INTO conversations (id, title, created_at, updated_at, user_id) VALUES (?, ?, ?, ?, ?)",
+                (cid, title, now, now, owner),
             )
 
     # 2. Retrieve last 10 messages for conversation context
     from orchestrator_core.memory.context import build_context
-    context = build_context(db, cid, body.command)
+    context = build_context(db, cid, body.command, owner=owner)
     history_text = context['conversation_history_text']
 
     # 3. Store user message in messages table
     user_msg_id = str(uuid.uuid4())
     with db:
         db.execute(
-            "INSERT INTO messages (id, conversation_id, role, content, agent, created_at) VALUES (?, ?, 'user', ?, NULL, ?)",
-            (user_msg_id, cid, body.command, now),
+            "INSERT INTO messages (id, conversation_id, role, content, agent, created_at, user_id) VALUES (?, ?, 'user', ?, NULL, ?, ?)",
+            (user_msg_id, cid, body.command, now, owner),
         )
 
     # 3.5 Check for deterministic operational command
-    op_result = _handle_operational_command(body.command, db, cid)
+    op_result = _handle_operational_command(body.command, db, cid, owner=owner)
     if op_result:
         latency_ms = int((time.monotonic() - t_start) * 1000)
         op_result.metadata["latency_ms"] = latency_ms
@@ -374,8 +367,8 @@ def dispatch_command(
         asst_msg_id = str(uuid.uuid4())
         with db:
             db.execute(
-                "INSERT INTO messages (id, conversation_id, role, content, agent, created_at) VALUES (?, ?, 'assistant', ?, ?, ?)",
-                (asst_msg_id, cid, op_result.output, op_result.agent, now),
+                "INSERT INTO messages (id, conversation_id, role, content, agent, created_at, user_id) VALUES (?, ?, 'assistant', ?, ?, ?, ?)",
+                (asst_msg_id, cid, op_result.output, op_result.agent, datetime.now(timezone.utc).isoformat(), owner),
             )
             db.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, cid))
         return op_result
@@ -390,8 +383,8 @@ def dispatch_command(
         clarification_msg = f"Clarification required: {classification.reasoning}. Options: {', '.join(classification.candidates)}"
         with db:
             db.execute(
-                "INSERT INTO messages (id, conversation_id, role, content, agent, created_at) VALUES (?, ?, 'assistant', ?, 'router', ?)",
-                (asst_msg_id, cid, clarification_msg, now),
+                "INSERT INTO messages (id, conversation_id, role, content, agent, created_at, user_id) VALUES (?, ?, 'assistant', ?, 'router', ?, ?)",
+                (asst_msg_id, cid, clarification_msg, datetime.now(timezone.utc).isoformat(), owner),
             )
             db.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, cid))
         return JSONResponse(
@@ -422,7 +415,7 @@ def dispatch_command(
         "conversation_history_text": history_text,
         "memory_context": context['memory_context'],
     }
-    result: AgentResult = run_handler(handler, body.command, db, agent_name, agent_meta, cid)
+    result: AgentResult = run_handler(handler, body.command, db, agent_name, agent_meta, cid, owner=owner)
 
     # 6. Auto-queue approval if write action is triggered and not yet queued
     if result.action_type and not result.approval_id:
@@ -455,8 +448,8 @@ def dispatch_command(
     asst_msg_id = str(uuid.uuid4())
     with db:
         db.execute(
-            "INSERT INTO messages (id, conversation_id, role, content, agent, created_at) VALUES (?, ?, 'assistant', ?, ?, ?)",
-            (asst_msg_id, cid, result.output, agent_name, now),
+            "INSERT INTO messages (id, conversation_id, role, content, agent, created_at, user_id) VALUES (?, ?, 'assistant', ?, ?, ?, ?)",
+            (asst_msg_id, cid, result.output, agent_name, datetime.now(timezone.utc).isoformat(), owner),
         )
         db.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, cid))
 
@@ -464,11 +457,18 @@ def dispatch_command(
 
 
 @router.post("/stream")
-def dispatch_command_stream(body: DispatchRequest, request: Request):
+def dispatch_command_stream(body: DispatchRequest, request: Request, owner: Optional[str] = Depends(request_owner)):
     """
     Classify and stream responses in real-time via Server-Sent Events (§5c No-Lag).
     Provider output is buffered within its deadline; no first-token latency is promised.
     """
+    if body.conversation_id:
+        check_db = get_db()
+        try:
+            conversation_for_owner(check_db, body.conversation_id, owner)
+        finally:
+            check_db.close()
+
     def event_stream():
         t_start = time.monotonic()
         now = datetime.now(timezone.utc).isoformat()
@@ -478,38 +478,38 @@ def dispatch_command_stream(body: DispatchRequest, request: Request):
             # 1. Resolve or create conversation session
             cid = body.conversation_id
             if cid:
-                row = db.execute("SELECT id FROM conversations WHERE id = ?", (cid,)).fetchone()
+                row = conversation_for_owner(db, cid, owner)
                 if not row:
                     title = body.command[:40] + ("..." if len(body.command) > 40 else "")
                     with db:
                         db.execute(
-                            "INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
-                            (cid, title, now, now),
+                            "INSERT INTO conversations (id, title, created_at, updated_at, user_id) VALUES (?, ?, ?, ?, ?)",
+                            (cid, title, now, now, owner),
                         )
             else:
                 cid = str(uuid.uuid4())
                 title = body.command[:40] + ("..." if len(body.command) > 40 else "")
                 with db:
                     db.execute(
-                        "INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
-                        (cid, title, now, now),
+                        "INSERT INTO conversations (id, title, created_at, updated_at, user_id) VALUES (?, ?, ?, ?, ?)",
+                        (cid, title, now, now, owner),
                     )
 
             # 2. Retrieve history context
             from orchestrator_core.memory.context import build_context
-            context = build_context(db, cid, body.command)
+            context = build_context(db, cid, body.command, owner=owner)
             history_text = context['conversation_history_text']
 
             # 3. Store user message
             user_msg_id = str(uuid.uuid4())
             with db:
                 db.execute(
-                    "INSERT INTO messages (id, conversation_id, role, content, agent, created_at) VALUES (?, ?, 'user', ?, NULL, ?)",
-                    (user_msg_id, cid, body.command, now),
+                    "INSERT INTO messages (id, conversation_id, role, content, agent, created_at, user_id) VALUES (?, ?, 'user', ?, NULL, ?, ?)",
+                    (user_msg_id, cid, body.command, now, owner),
                 )
 
             # 3.5 Check for deterministic operational command
-            op_result = _handle_operational_command(body.command, db, cid)
+            op_result = _handle_operational_command(body.command, db, cid, owner=owner)
             if op_result:
                 latency_ms = int((time.monotonic() - t_start) * 1000)
                 yield f"event: meta\ndata: {json.dumps({'agent': op_result.agent, 'conversation_id': cid, 'confidence': 1.0, 'reasoning': 'Deterministic operational execution'})}\n\n"
@@ -517,8 +517,8 @@ def dispatch_command_stream(body: DispatchRequest, request: Request):
                 asst_msg_id = str(uuid.uuid4())
                 with db:
                     db.execute(
-                        "INSERT INTO messages (id, conversation_id, role, content, agent, created_at) VALUES (?, ?, 'assistant', ?, ?, ?)",
-                        (asst_msg_id, cid, op_result.output, op_result.agent, now),
+                        "INSERT INTO messages (id, conversation_id, role, content, agent, created_at, user_id) VALUES (?, ?, 'assistant', ?, ?, ?, ?)",
+                        (asst_msg_id, cid, op_result.output, op_result.agent, datetime.now(timezone.utc).isoformat(), owner),
                     )
                     db.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, cid))
                 yield f"event: done\ndata: {json.dumps({'output': op_result.output, 'agent': op_result.agent, 'action_type': op_result.action_type, 'approval_id': op_result.approval_id, 'latency_ms': latency_ms, 'conversation_id': cid})}\n\n"
@@ -532,8 +532,8 @@ def dispatch_command_stream(body: DispatchRequest, request: Request):
                 asst_msg_id = str(uuid.uuid4())
                 with db:
                     db.execute(
-                        "INSERT INTO messages (id, conversation_id, role, content, agent, created_at) VALUES (?, ?, 'assistant', ?, 'router', ?)",
-                        (asst_msg_id, cid, clarification_msg, now),
+                        "INSERT INTO messages (id, conversation_id, role, content, agent, created_at, user_id) VALUES (?, ?, 'assistant', ?, 'router', ?, ?)",
+                        (asst_msg_id, cid, clarification_msg, datetime.now(timezone.utc).isoformat(), owner),
                     )
                     db.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, cid))
                 yield f"event: clarification\ndata: {json.dumps(classification.model_dump())}\n\n"
@@ -571,7 +571,7 @@ def dispatch_command_stream(body: DispatchRequest, request: Request):
                     "conversation_history_text": history_text,
                     "memory_context": context['memory_context'],
                 }
-                result: AgentResult = run_handler(handler, body.command, db, agent_name, agent_meta, cid)
+                result: AgentResult = run_handler(handler, body.command, db, agent_name, agent_meta, cid, owner=owner)
                 full_text = result.output
                 action_type = result.action_type
                 approval_id = result.approval_id
@@ -596,8 +596,8 @@ def dispatch_command_stream(body: DispatchRequest, request: Request):
             asst_msg_id = str(uuid.uuid4())
             with db:
                 db.execute(
-                    "INSERT INTO messages (id, conversation_id, role, content, agent, created_at) VALUES (?, ?, 'assistant', ?, ?, ?)",
-                    (asst_msg_id, cid, full_text, agent_name, now),
+                    "INSERT INTO messages (id, conversation_id, role, content, agent, created_at, user_id) VALUES (?, ?, 'assistant', ?, ?, ?, ?)",
+                    (asst_msg_id, cid, full_text, agent_name, datetime.now(timezone.utc).isoformat(), owner),
                 )
                 db.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, cid))
 

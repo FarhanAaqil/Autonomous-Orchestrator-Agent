@@ -105,3 +105,20 @@ def test_saved_dependency_resumes_after_connection_restart(pg):
         assert JobService.get_job(job.id, restarted).status == 'queued'
     finally:
         restarted.close()
+
+
+def test_concurrent_account_admission_cannot_exceed_plan(pg, monkeypatch):
+    import uuid
+    from orchestrator_core.core.identity import create_user
+    from orchestrator_core.core.plans import PLANS, PlanLimitExceeded
+    from orchestrator_core.jobs.service import JobService
+    owner = create_user(pg, 'quota-' + uuid.uuid4().hex, 'fixture-password-123')['id']
+    monkeypatch.setitem(PLANS, 'free', {**PLANS['free'], 'runs_per_day': 1})
+    def submit(db, index):
+        try:
+            JobService.create_job('general_chat', 'Quota race', db, owner=owner)
+            return True
+        except PlanLimitExceeded:
+            return False
+    assert sum(race(submit)) == 1
+    assert pg.execute('SELECT COUNT(*) FROM jobs WHERE user_id=?', (owner,)).fetchone()[0] == 1

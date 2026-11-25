@@ -173,7 +173,7 @@ def _heuristic_classify(command: str) -> dict:
     }
 
 
-def _call_groq(command: str) -> dict:
+def _call_groq(command: str, allow_fallback: bool = True) -> dict:
     """Make the raw Groq API call. Wrapped by circuit breaker externally."""
     settings = get_settings()
     try:
@@ -197,7 +197,7 @@ def _call_groq(command: str) -> dict:
         return json.loads(raw)
     except Exception as exc:
         err_msg = str(exc).lower()
-        if (
+        if allow_fallback and (
             "api_key" in err_msg
             or "401" in err_msg
             or "unauthorized" in err_msg
@@ -233,7 +233,7 @@ def prompt_hash(command: str) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
-def classify(command: str, use_cache: bool = True) -> Union[RouterResult, ClarificationNeeded]:
+def classify(command: str, use_cache: bool = True, allow_fallback: bool = True) -> Union[RouterResult, ClarificationNeeded]:
     """
     Classify a user command and return either a RouterResult or a ClarificationNeeded.
 
@@ -242,16 +242,16 @@ def classify(command: str, use_cache: bool = True) -> Union[RouterResult, Clarif
     Uses server-side in-memory caching to eliminate redundant LLM calls.
     """
     cache_key = command.strip().lower()
-    if use_cache and cache_key in _classification_cache:
+    if use_cache and allow_fallback and cache_key in _classification_cache:
         cached_time, cached_result = _classification_cache[cache_key]
         if time.monotonic() - cached_time < ROUTER_CACHE_TTL:
-            logger.debug("[router] Cache hit for command: %s", command[:40])
+            logger.debug("[router] Classification cache hit")
             return cached_result
 
     settings = get_settings()
     threshold = settings.router_confidence_threshold
 
-    data = _groq_breaker.call(_call_groq, command)
+    data = _groq_breaker.call(_call_groq, command) if allow_fallback else _groq_breaker.call(lambda value: _call_groq(value, allow_fallback=False), command)
 
     agent = data.get("agent", "").strip()
     confidence = float(data.get("confidence", 0.0))
@@ -273,7 +273,7 @@ def classify(command: str, use_cache: bool = True) -> Union[RouterResult, Clarif
     else:
         result = RouterResult(agent=agent, confidence=confidence, reasoning=reasoning)
 
-    if use_cache:
+    if use_cache and allow_fallback:
         if len(_classification_cache) >= ROUTER_CACHE_MAX_ENTRIES:
             oldest_keys = sorted(_classification_cache, key=lambda k: _classification_cache[k][0])[:100]
             for k in oldest_keys:

@@ -13,6 +13,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from orchestrator_core.core.ownership import request_owner
 from orchestrator_core.memory.episodic import summarize_session
 from orchestrator_core.memory.forget import forget
 from orchestrator_core.memory.semantic import (
@@ -57,6 +58,7 @@ def list_memories(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: sqlite3.Connection = Depends(get_db_connection),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """List memory items with optional kind and review status filters."""
     items = list_memory_items(
@@ -64,6 +66,7 @@ def list_memories(
         pending_review=pending_review,
         include_deleted=False,
         db=db,
+        owner=owner,
         limit=limit,
         offset=offset,
     )
@@ -74,6 +77,7 @@ def list_memories(
 def create_memory(
     body: MemoryItemCreate,
     db: sqlite3.Connection = Depends(get_db_connection),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """Store a new fact, preference, or memory item."""
     try:
@@ -85,6 +89,7 @@ def create_memory(
             source_message_id=body.source_message_id,
             pending_review=body.pending_review,
             db=db,
+        owner=owner,
         )
         return _to_response(rec)
     except ValueError as exc:
@@ -95,9 +100,10 @@ def create_memory(
 def get_memory(
     memory_id: str,
     db: sqlite3.Connection = Depends(get_db_connection),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """Retrieve a specific memory item by ID."""
-    rec = get_memory_item(memory_id, db)
+    rec = get_memory_item(memory_id, db, owner=owner)
     if not rec or rec.deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Memory item '{memory_id}' not found")
     return _to_response(rec)
@@ -108,6 +114,7 @@ def update_memory(
     memory_id: str,
     body: MemoryItemUpdate,
     db: sqlite3.Connection = Depends(get_db_connection),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """Edit memory item key, value, or review confirmation status."""
     try:
@@ -117,6 +124,7 @@ def update_memory(
             key=body.key,
             pending_review=body.pending_review,
             db=db,
+        owner=owner,
         )
         return _to_response(rec)
     except ValueError as exc:
@@ -127,10 +135,11 @@ def update_memory(
 def confirm_memory(
     memory_id: str,
     db: sqlite3.Connection = Depends(get_db_connection),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """Confirm a pending memory item, marking it trusted."""
     try:
-        rec = confirm(memory_id, db)
+        rec = confirm(memory_id, db, owner=owner)
         return _to_response(rec)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
@@ -140,9 +149,10 @@ def confirm_memory(
 def delete_memory(
     memory_id: str,
     db: sqlite3.Connection = Depends(get_db_connection),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """Delete a memory item and purge its vector representation."""
-    ok = forget(memory_id, db, purge_vector=True)
+    ok = forget(memory_id, db, purge_vector=True, owner=owner)
     if not ok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Memory item '{memory_id}' not found")
     return {"deleted": True, "id": memory_id}
@@ -152,9 +162,10 @@ def delete_memory(
 def summarize_conversation_session(
     session_id: str,
     db: sqlite3.Connection = Depends(get_db_connection),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """Summarize a conversation session and store its episodic memory summary."""
-    rec = summarize_session(session_id, db)
+    rec = summarize_session(session_id, db, owner=owner)
     if not rec:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
