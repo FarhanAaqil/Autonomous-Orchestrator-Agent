@@ -55,19 +55,26 @@ The local runner disables dotenv loading and external sockets and uses disposabl
 
 In `frontend`, run `npm run lint`, `npm test`, and `npm run build`. Browser workflows use `python scripts/phase3_browser_server.py` on port 8081, then `npm --prefix frontend run test:browser`; this fixture has separate test accounts and simulation-only data.
 
-On 2026-11-25 the combined local branch passed **364 Python tests**, with **8 PostgreSQL/restore checks skipped**, and **11 browser workflows**. Eight disposable PostgreSQL checks passed separately on 2026-11-19. These are local results, not a claim that current remote CI or production deployment passed.
+On 2026-11-26 the branch passed **395 isolated Python tests**, with **8 PostgreSQL/restore checks skipped** in that run. All **9 checks in the separate disposable PostgreSQL/restore suite** passed. The frontend builds and passes lint, its 6 unit tests, and the configured asset budgets. Three desktop endpoint checks also passed. These are local results; no production database upgrade was performed.
 
-The corrected frozen offline router evaluation measured **66/106 (62.3%)**, below the unchanged **90%** gate. The previous label-derived 100% score was invalid. The router release gate remains failing; it must not be bypassed or reported as complete. Live provider evaluation has not been performed.
+The corrected frozen offline router evaluation measured **71/106 (67.0%)**, below the unchanged **90%** accuracy gate and several per-class F1 gates. Development-only intent improvements scored 102/103 on the development split but did not generalize sufficiently. The former label-derived 100% score was invalid. The release gate remains failing; do not bypass it or report the release complete. No live provider evaluation was performed.
+
+## Personal accounts in this branch
+
+Settings supports separate GitHub and Gmail OAuth grants, validated DEV/Hashnode/Groq personal tokens, encrypted owner-bound storage, disconnect, personal execution mode, daily/monthly token usage, and JSON account export. Gmail is restricted to the configured beta allowlist; sending uses the account's own grant and still requires signed approval. LinkedIn is manual drafts only. Other publishing adapters remain unavailable.
+
+Pricing reads the server-owned limits. An optional HTTPS payment link opens the operator's configured payment page; administrators grant Pro access with an explicit expiry after verifying payment. Automatic payment webhooks are deferred. Policy pages are prominently marked **DRAFT: needs human review**. Starter templates fill an editable brief without submitting it.
 
 ## Remaining launch gates
 
-- Database-enforced tenant isolation, final owner constraints, and complete adversarial two-account coverage.
-- Personal GitHub/Gmail OAuth and publishing credentials, provider scope validation, per-account execution mode, and removal of operator-credential fallback for user work.
-- Complete usage enforcement across synchronous work and email, personal model keys, payment-link workflow, and account export/deletion.
-- Landing/pricing/onboarding and reviewed privacy, terms, and acceptable-use policies.
-- Router quality gate, production backup schedule and restore drill, load/recovery testing, sanitized logs, deployment checks, and independent security review.
+- PostgreSQL row-level security and NOT NULL owner constraints, with transaction context, worker/scheduler handling, backfill, and rollback rehearsal.
+- Complete account deletion across SQL and vectors, including concurrent work and retryable failures. Export is implemented; deletion is not.
+- Personal GitHub/DEV/Hashnode publishing adapters with receipt/error tests; Gmail OAuth operator verification and configuration.
+- Daily admission limits covering synchronous work as well as queued jobs, and additional first-24-hour abuse limits. Request concurrency is currently bounded per account and globally in one API process; multiple API processes require coordinated admission.
+- Passing genuine router quality gates, nightly production backup scheduling, uptime/error tracking, final deployment/load/recovery checks, and independent security review.
+- Real domain/hosting, SMTP, OAuth applications, connection encryption keys, payment details, and human review of legal drafts.
 
-The optional Compose `public` profile provides a Caddy proxy, but does not establish public-launch readiness. Domain, hosting, SMTP, OAuth applications, payment details, and legal review require operator configuration. The application should remain private until the gates above pass.
+The Compose `public` profile provides a Caddy proxy; it does not establish launch readiness. Public registration defaults to disabled. Keep the installation private until these gates pass. Existing running containers are not automatically upgraded by source commits.
 
 ## Operations
 

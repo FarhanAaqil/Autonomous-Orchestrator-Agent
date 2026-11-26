@@ -167,3 +167,27 @@ test('settings shows personal usage without exposing other accounts', async ({pa
   expect((await (await page.request.get('/conversations')).json())).toEqual([]);
   expect((await page.request.get('/conversations/long-history')).status()).toBe(404);
 });
+
+
+test('personal export excludes another account and downloads JSON', async ({page}) => {
+  await login(page, 'browser-viewer');
+  await page.getByRole('button', {name:'Settings', exact:true}).click();
+  const response = page.waitForResponse(r => r.url().endsWith('/account/export'));
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', {name:'Export my data', exact:true}).click();
+  expect((await download).suggestedFilename()).toBe('toji-account.json');
+  const data = await (await response).json();
+  expect(data.profile.username).toBe('browser-viewer');
+  expect(data.profile.password_hash).toBeUndefined();
+  expect(data.records.conversations).toEqual([]);
+  expect(data.records.messages).toEqual([]);
+});
+
+test('starter templates fill a brief without submitting work', async ({page}) => {
+  await login(page);
+  let submitted = false;
+  page.on('request', r => {if (r.method() === 'POST' && r.url().includes('/dispatch')) submitted = true;});
+  await page.getByRole('button', {name:'Prepare an application', exact:true}).click();
+  await expect(page.getByLabel('Your message', {exact:true})).toHaveValue(/Ask for my experience/);
+  expect(submitted).toBe(false);
+});
