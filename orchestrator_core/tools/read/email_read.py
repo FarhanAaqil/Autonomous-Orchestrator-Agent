@@ -49,6 +49,10 @@ def email_read(action: str = "check_inbox", max_messages: int = 5) -> str:
     """
     Check unread correspondence via IMAP read-only connection.
     """
+    from orchestrator_core.core.ownership import execution_owner
+    if execution_owner.get() is not None:
+        from orchestrator_core.core.personal_providers import gmail_inbox
+        return sanitize_observation(gmail_inbox(max_messages), source="gmail_api")
     email_addr = os.getenv("EMAIL_ADDRESS")
     email_pass = os.getenv("EMAIL_APP_PASSWORD")
 
@@ -93,5 +97,5 @@ def email_read(action: str = "check_inbox", max_messages: int = 5) -> str:
         return sanitize_observation("\n".join(summaries), source="email_imap")
 
     except Exception as exc:
-        logger.warning("[email_read] IMAP error: %s", exc)
+        logger.warning("[email_read] IMAP error: %s", type(exc).__name__)
         return sanitize_observation(f"Unable to access inbox via IMAP: {exc}", source="email_imap")

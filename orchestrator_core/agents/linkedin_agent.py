@@ -67,7 +67,7 @@ def _call_llm(prompt: str) -> str:
         )
         return response.choices[0].message.content
     except Exception as exc:
-        logger.warning("[linkedin_agent] Groq call failed (%s) — using fallback.", exc)
+        logger.warning("[linkedin_agent] Groq call failed (%s) — using fallback.", type(exc).__name__)
         return (
             "Hi [Name], I noticed your work at [Company]. As an AI/ML engineer building autonomous "
             "agent systems and ML pipelines (DiaPredict AI), I'd love to connect and follow your work."
@@ -97,7 +97,7 @@ def handle(command: str, metadata: Optional[dict[str, Any]] = None) -> AgentResu
       - Reads: recruiter search, drafting posts/notes/DMs, profile review (free)
       - Writes: posting updates or sending invites (gated behind approval gate)
     """
-    logger.info("[linkedin_agent] Processing command: %.80s", command)
+    logger.info("[linkedin_agent] Processing request")
     lower = command.lower().strip()
     meta = dict(metadata or {})
 

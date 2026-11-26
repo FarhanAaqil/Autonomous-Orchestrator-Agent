@@ -68,7 +68,7 @@ def arxiv_search(query: str, max_results: int = 5) -> list[dict[str, Any]]:
             })
         return results
     except Exception as exc:
-        logger.warning("[arxiv_search] Search error (%s) — providing structured fallback.", exc)
+        logger.warning("[arxiv_search] Search error (%s) — providing structured fallback.", type(exc).__name__)
         return [
             {
                 "title": f"Simulated arXiv result for '{query}'",
@@ -106,5 +106,5 @@ def fetch_arxiv_text(pdf_url: str, max_pages: int = 10) -> str:
 
         return sanitize_observation(text, source="arxiv.org", max_chars=12000)
     except Exception as exc:
-        logger.warning("[arxiv_search] PDF text fetch error: %s", exc)
+        logger.warning("[arxiv_search] PDF text fetch error: %s", type(exc).__name__)
         return sanitize_observation(f"Error fetching arXiv paper text: {exc}", source="arxiv.org")

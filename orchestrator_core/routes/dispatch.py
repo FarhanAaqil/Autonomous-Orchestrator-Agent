@@ -136,7 +136,7 @@ def _handle_operational_command(command: str, db: sqlite3.Connection, conversati
                 metadata={"run_id": run_id, "pipeline_name": p_name, "approval_id": approval_id},
             )
         except Exception as exc:
-            logger.exception("Pipeline execution failed: %s", exc)
+            logger.error("Pipeline execution failed: %s", type(exc).__name__)
             return AgentResult(
                 agent="pipeline_engine",
                 output=f"❌ **Pipeline Execution Failed**: {exc}",

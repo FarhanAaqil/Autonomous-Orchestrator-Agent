@@ -151,7 +151,7 @@ def _fallback_ddg_search(query: str, max_results: int = 5) -> list[dict[str, str
                 })
         return results
     except Exception as exc:
-        logger.warning("[google_search] DDG fallback failed: %s", exc)
+        logger.warning("[google_search] DDG fallback failed: %s", type(exc).__name__)
         return [{"title": "Search Unavailable", "snippet": f"Search provider error: {exc}", "url": ""}]
 
 
@@ -221,7 +221,7 @@ def google_search(query: str, max_results: int = 5, db: Optional[sqlite3.Connect
                 _google_search_breaker.record_failure()
                 return _fallback_ddg_search(query, max_results)
         except Exception as exc:
-            logger.warning("[google_search] Google API call error (%s). Falling back to DDG.", exc)
+            logger.warning("[google_search] Google API call error (%s). Falling back to DDG.", type(exc).__name__)
             _google_search_breaker.record_failure()
             return _fallback_ddg_search(query, max_results)
     finally:

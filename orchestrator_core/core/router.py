@@ -167,7 +167,7 @@ def _call_groq(command: str, allow_fallback: bool = True) -> dict:
             or "failed to validate json" in err_msg
             or "400" in err_msg
         ):
-            logger.warning("[router] Groq API returned error (%s) — using heuristic routing.", exc)
+            logger.warning("[router] Groq API returned error (%s) — using heuristic routing.", type(exc).__name__)
             return _heuristic_classify(command)
         raise
 

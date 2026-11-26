@@ -34,18 +34,36 @@ class GitHubReadArgs(BaseModel):
         default=None, description="Repository identifier in 'owner/repo' format."
     )
     username: Optional[str] = Field(
-        default="FarhanAaqil", description="GitHub username to inspect."
+        default=None, description="Optional public GitHub username; defaults to your connected account."
     )
 
 
 def github_read(
     action: str,
     repo: Optional[str] = None,
-    username: Optional[str] = "FarhanAaqil",
+    username: Optional[str] = None,
 ) -> str:
     """
     Read information from GitHub REST API under strict SSRF-safe GET constraints.
     """
+    from orchestrator_core.core.ownership import execution_owner
+    if execution_owner.get() is not None:
+        import json
+        import re
+        from orchestrator_core.core.personal_providers import github_read as personal_read
+        from orchestrator_core.core.connections import ConnectionUnavailable
+        if username and not re.fullmatch(r'[A-Za-z0-9-]{1,39}', username):
+            raise ConnectionUnavailable('Enter a valid GitHub username')
+        if repo and not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repo):
+            raise ConnectionUnavailable('Enter a repository as owner/name')
+        endpoints = {'get_user': '/users/' + username if username else '/user',
+                     'list_repos': '/users/' + username + '/repos?per_page=10&sort=updated' if username else '/user/repos?per_page=10&sort=updated'}
+        if repo:
+            endpoints.update(get_repo='/repos/' + repo, get_issues='/repos/' + repo + '/issues?per_page=5&state=open')
+        endpoint = endpoints.get(action.strip().lower())
+        if endpoint is None:
+            raise ConnectionUnavailable('Choose a supported GitHub read action and its required repository')
+        return sanitize_observation(json.dumps(personal_read(endpoint), ensure_ascii=False), source='github_api')
     token = os.getenv("GITHUB_TOKEN")
     headers = {"Accept": "application/vnd.github.v3+json"}
     if token and not token.startswith("your_"):
@@ -115,7 +133,7 @@ def github_read(
                 return sanitize_observation("\n".join(lines), source="github_api")
 
     except Exception as exc:
-        logger.warning("[github_read] API error (%s) — providing simulated fallback.", exc)
+        logger.warning("[github_read] API error (%s) — providing simulated fallback.", type(exc).__name__)
 
     # Simulated fallback response
     user = username or "FarhanAaqil"

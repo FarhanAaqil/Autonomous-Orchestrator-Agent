@@ -67,7 +67,7 @@ def _call_llm(
         )
         return response.choices[0].message.content
     except Exception as exc:
-        logger.warning("[general_chat_agent] Groq call failed (%s) — using fallback.", exc)
+        logger.warning("[general_chat_agent] Groq call failed (%s) — using fallback.", type(exc).__name__)
         return (
             "Greetings. I am Toji, Farhan Aaqil's orchestration companion. All systems are operational.\n\n"
             "Tell me what you need executed — technical research, code architecture, career strategy, email outreach, GitHub operations, or content publishing."
@@ -102,7 +102,7 @@ def stream_llm(
             if content:
                 yield content
     except Exception as exc:
-        logger.warning("[general_chat_agent] Groq streaming call failed (%s) — using fallback.", exc)
+        logger.warning("[general_chat_agent] Groq streaming call failed (%s) — using fallback.", type(exc).__name__)
         fallback = (
             "Greetings. I am Toji, Farhan Aaqil's orchestration companion. All systems are operational.\n\n"
             "Tell me what you need executed — technical research, code architecture, career strategy, email outreach, GitHub operations, or content publishing."
@@ -115,7 +115,7 @@ def handle(command: str, metadata: Optional[dict[str, Any]] = None) -> AgentResu
     """
     Entry point for the General Chat Agent.
     """
-    logger.info("[general_chat_agent] Processing message: %.80s", command)
+    logger.info("[general_chat_agent] Processing request")
     meta = dict(metadata or {})
     context_str = meta.get("conversation_history_text")
     memory_str = meta.get("memory_context")

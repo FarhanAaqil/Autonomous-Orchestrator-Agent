@@ -100,7 +100,7 @@ def _call_llm(prompt: str) -> str:
     except Exception as exc:
         err_msg = str(exc).lower()
         if "api_key" in err_msg or "401" in err_msg or "unauthorized" in err_msg or "invalid api key" in err_msg:
-            logger.warning("[research_agent] Groq auth error: %s — providing structured demo output.", exc)
+            logger.warning("[research_agent] Groq auth error: %s — providing structured demo output.", type(exc).__name__)
             return (
                 "⚠️ *Notice: Configured GROQ_API_KEY in .env is expired/invalid. Showing simulated research synthesis:*\n\n"
                 "### Literature Synthesis & Paper Analysis\n\n"
@@ -120,7 +120,7 @@ def handle(command: str, metadata: Optional[dict[str, Any]] = None) -> AgentResu
     Detects read_full_paper intent and applies the SSRF guard before fetching.
     All other commands go straight to the LLM.
     """
-    logger.info("[research_agent] Processing command: %.80s", command)
+    logger.info("[research_agent] Processing request")
 
     lower = command.lower()
     output: str

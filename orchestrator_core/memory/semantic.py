@@ -43,7 +43,7 @@ def _sync_to_chroma(
             metadatas=[safe_meta],
         )
     except Exception as exc:
-        logger.warning("[memory] ChromaDB sync failed for item %s: %s", item_id, exc)
+        logger.warning("[memory] ChromaDB sync failed for item %s: %s", item_id, type(exc).__name__)
 
 
 def _row_to_record(row: sqlite3.Row) -> MemoryItemRecord:

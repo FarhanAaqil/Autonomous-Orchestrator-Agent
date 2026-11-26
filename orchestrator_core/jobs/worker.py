@@ -123,7 +123,7 @@ class Worker:
                     # Sleep only if no work was found
                     self._stop_event.wait(self.poll_interval)
             except Exception as exc:
-                logger.exception("Unexpected error in worker loop %s: %s", self.worker_id, exc)
+                logger.error("Unexpected error in worker loop %s: %s", self.worker_id, type(exc).__name__)
                 self._stop_event.wait(self.poll_interval)
 
         logger.info("Worker %s stopped cleanly.", self.worker_id)

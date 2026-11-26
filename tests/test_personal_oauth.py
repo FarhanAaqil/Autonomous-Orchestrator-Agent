@@ -98,3 +98,27 @@ def test_read_tools_never_use_operator_or_another_accounts_secret(db, configured
     finally:
         usage_db.reset(marker)
     assert seen == ['Bearer alice-token']
+
+
+def test_runner_read_tools_never_fall_back_to_operator_tokens(monkeypatch):
+    from unittest.mock import Mock
+    from orchestrator_core.core.ownership import execution_owner
+    from orchestrator_core.tools.read.github_read import github_read
+    from orchestrator_core.tools.read.email_read import email_read
+    monkeypatch.setenv('GITHUB_TOKEN', 'operator-token-never-used')
+    monkeypatch.setenv('EMAIL_ADDRESS', 'operator@example.org')
+    monkeypatch.setenv('EMAIL_APP_PASSWORD', 'operator-password-never-used')
+    github = Mock(return_value={'login': 'personal-account'})
+    gmail = Mock(return_value='Personal inbox')
+    monkeypatch.setattr('orchestrator_core.core.personal_providers.github_read', github)
+    monkeypatch.setattr('orchestrator_core.core.personal_providers.gmail_inbox', gmail)
+    marker = execution_owner.set('personal-owner')
+    try:
+        assert 'personal-account' in github_read('get_user')
+        github.assert_called_once_with('/user')
+        assert 'Personal inbox' in email_read()
+        gmail.side_effect = ConnectionUnavailable('Connect your Gmail account')
+        with pytest.raises(ConnectionUnavailable, match='Connect your Gmail'):
+            email_read()
+    finally:
+        execution_owner.reset(marker)

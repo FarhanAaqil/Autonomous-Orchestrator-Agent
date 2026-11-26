@@ -86,7 +86,7 @@ def _call_llm(prompt: str) -> str:
     except Exception as exc:
         err_msg = str(exc).lower()
         if "api_key" in err_msg or "401" in err_msg or "unauthorized" in err_msg or "invalid api key" in err_msg:
-            logger.warning("[career_agent] Groq auth error: %s — providing structured demo output.", exc)
+            logger.warning("[career_agent] Groq auth error: %s — providing structured demo output.", type(exc).__name__)
             return (
                 "⚠️ *Notice: Configured GROQ_API_KEY in .env is expired/invalid. Showing simulated response:*\n\n"
                 "### Career Assessment & Recommendations for Farhan Aaqil\n\n"
@@ -108,7 +108,7 @@ def handle(command: str, metadata: Optional[dict[str, Any]] = None) -> AgentResu
     Accepts a natural-language command and returns an AgentResult.
     Cover-letter generation is handled here (absorbed from v1 JobAgent).
     """
-    logger.info("[career_agent] Processing command: %.80s", command)
+    logger.info("[career_agent] Processing request")
 
     # Detect cover-letter intent (absorbed from JobAgent per corrective plan §2.1)
     lower = command.lower()

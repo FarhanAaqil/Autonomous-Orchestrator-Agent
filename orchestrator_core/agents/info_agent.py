@@ -99,7 +99,7 @@ def _call_llm(prompt: str) -> str:
         )
         return response.choices[0].message.content
     except Exception as exc:
-        logger.warning("[info_agent] LLM call failed: %s — providing structured documentation.", exc)
+        logger.warning("[info_agent] LLM call failed: %s — providing structured documentation.", type(exc).__name__)
         return (
             "### Orchestrator Information & Architecture\n\n"
             "**Developer**: Farhan Aaqil (B.Tech AI/ML, JPNCE Mahbubnagar 2027)\n\n"
@@ -131,7 +131,7 @@ def handle(command: str, metadata: Optional[dict[str, Any]] = None) -> AgentResu
     Entry point for the info agent.
     Provides system documentation, project knowledge, and conversational responses.
     """
-    logger.info("[info_agent] Processing query: %.80s", command)
+    logger.info("[info_agent] Processing request")
     output = _call_llm(command)
     return AgentResult(
         agent="info_agent",

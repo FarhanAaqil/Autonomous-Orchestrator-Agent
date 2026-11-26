@@ -50,7 +50,7 @@ def _search_google_custom(query: str, max_results: int = 5) -> Optional[list[dic
             ]
         logger.warning("[web_search] Google CSE returned HTTP %d: %s", resp.status_code, resp.text[:200])
     except Exception as exc:
-        logger.warning("[web_search] Google CSE error: %s", exc)
+        logger.warning("[web_search] Google CSE error: %s", type(exc).__name__)
     return None
 
 
@@ -81,7 +81,7 @@ def _search_serpapi(query: str, max_results: int = 5) -> Optional[list[dict[str,
             ]
         logger.warning("[web_search] SerpAPI returned HTTP %d: %s", resp.status_code, resp.text[:200])
     except Exception as exc:
-        logger.warning("[web_search] SerpAPI error: %s", exc)
+        logger.warning("[web_search] SerpAPI error: %s", type(exc).__name__)
     return None
 
 
@@ -103,7 +103,7 @@ def _search_ddg(query: str, max_results: int = 5) -> list[dict[str, str]]:
                 })
         return results
     except Exception as exc:
-        logger.warning("[web_search] DuckDuckGo search error: %s", exc)
+        logger.warning("[web_search] DuckDuckGo search error: %s", type(exc).__name__)
         return [{"error": str(exc), "query": query}]
 
 
@@ -145,7 +145,7 @@ def search_news(query: str, max_results: int = 5) -> list[dict[str, Any]]:
                 })
         return results
     except Exception as exc:
-        logger.warning("[web_search] News search error: %s", exc)
+        logger.warning("[web_search] News search error: %s", type(exc).__name__)
         return [{"error": str(exc), "query": query}]
 
 
@@ -173,7 +173,7 @@ def search_arxiv(query: str, max_results: int = 10) -> list[dict[str, Any]]:
             })
         return results
     except Exception as exc:
-        logger.warning("[web_search] arXiv search error: %s", exc)
+        logger.warning("[web_search] arXiv search error: %s", type(exc).__name__)
         return [{"error": str(exc), "query": query}]
 
 

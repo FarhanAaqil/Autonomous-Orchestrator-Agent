@@ -54,7 +54,7 @@ def _call_llm(prompt: str) -> str:
     except Exception as exc:
         err_msg = str(exc).lower()
         if "api_key" in err_msg or "401" in err_msg or "unauthorized" in err_msg or "invalid api key" in err_msg:
-            logger.warning("[growth_agent] Groq auth error: %s — providing structured demo output.", exc)
+            logger.warning("[growth_agent] Groq auth error: %s — providing structured demo output.", type(exc).__name__)
             return (
                 "⚠️ *Notice: Configured GROQ_API_KEY in .env is expired/invalid. Showing simulated content:*\n\n"
                 "## Building Production Multi-Agent Systems: Why Unbypassable Gates Matter\n\n"
@@ -80,7 +80,7 @@ def handle(command: str, metadata: Optional[dict[str, Any]] = None) -> AgentResu
     the agent signals it via action_type so the caller can queue an approval.
     The agent NEVER imports or calls Hashnode/Dev.to SDKs directly.
     """
-    logger.info("[growth_content_agent] Processing command: %.80s", command)
+    logger.info("[growth_content_agent] Processing request")
 
     lower = command.lower()
     output = _call_llm(command)

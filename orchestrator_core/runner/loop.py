@@ -174,7 +174,7 @@ def run_job(
             )
             return JobService.transition(job.id, "failed", db, error=str(exc), worker_id=worker_id)
         except JobError as exc:
-            logger.error("Job %s failed guardrail check: %s", job.id, exc)
+            logger.error("Job %s failed guardrail check: %s", job.id, type(exc).__name__)
             return JobService.transition(job.id, "failed", db, error=str(exc), worker_id=worker_id)
 
         # 2. Atomic heartbeat check (verifies worker lease is still valid)
@@ -230,7 +230,7 @@ def run_job(
 
             duration_ms = int((time.monotonic() - t0) * 1000)
         except Exception as exc:
-            logger.exception("LLM generation failed for job %s step %d: %s", job.id, step_idx, exc)
+            logger.error("LLM generation failed for job %s step %d: %s", job.id, step_idx, type(exc).__name__)
             JobService.record_step(
                 job_id=job.id,
                 idx=step_idx,
@@ -312,7 +312,10 @@ def run_job(
                         with execution_scope(job.agent, job.session_id, owner=job.user_id):
                             raw_tool_result = tool_fn(tool_args)
                 except Exception as tool_exc:
-                    logger.warning("Tool execution error in job %s: %s", job.id, tool_exc)
+                    from orchestrator_core.core.connections import ConnectionUnavailable
+                    if isinstance(tool_exc, ConnectionUnavailable):
+                        raise
+                    logger.warning("Tool execution error in job %s: %s", job.id, type(tool_exc).__name__)
                     raw_tool_result = f"Error executing tool '{tool_name}': {tool_exc}"
                     tool_ok = False
 
@@ -380,7 +383,7 @@ def run_job(
                 logger.info("Job %s created approval proposal %s. Pausing in awaiting_approval.", job.id, approval_id)
                 return JobService.transition(job.id, "awaiting_approval", db, worker_id=worker_id)
             except Exception as prop_exc:
-                logger.error("Failed to request approval for job %s: %s", job.id, prop_exc)
+                logger.error("Failed to request approval for job %s: %s", job.id, type(prop_exc).__name__)
                 JobService.record_step(
                     job_id=job.id,
                     idx=step_idx,

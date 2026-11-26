@@ -50,7 +50,7 @@ def _default_llm_summarize(transcript: str) -> str:
         )
         return resp.choices[0].message.content or "Episode summarized."
     except Exception as exc:
-        logger.warning("[episodic] Groq summarization call failed: %s — using rule-based summary.", exc)
+        logger.warning("[episodic] Groq summarization call failed: %s — using rule-based summary.", type(exc).__name__)
         lines = [line.strip() for line in transcript.split("\n") if line.strip()]
         first_few = " | ".join(lines[:3]) if lines else "Empty session"
         return f"Session Synopsis: {first_few[:200]}"
@@ -132,7 +132,7 @@ def summarize_session(
         )
         logger.info("[episodic] Episode summary vector stored in ChromaDB (id=%s).", item_id)
     except Exception as exc:
-        logger.warning("[episodic] ChromaDB sync failed for episode %s: %s", item_id, exc)
+        logger.warning("[episodic] ChromaDB sync failed for episode %s: %s", item_id, type(exc).__name__)
 
     logger.info("[episodic] Session %s summarized into episode %s.", session_id, item_id)
     # Fetch and return created record

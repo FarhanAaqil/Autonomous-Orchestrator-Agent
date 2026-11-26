@@ -62,7 +62,7 @@ def _call_llm(prompt: str) -> str:
         )
         return response.choices[0].message.content
     except Exception as exc:
-        logger.warning("[email_agent] Groq call failed (%s) — providing template fallback.", exc)
+        logger.warning("[email_agent] Groq call failed (%s) — providing template fallback.", type(exc).__name__)
         return (
             f"Subject: Inquiring Regarding Opportunities\n\n"
             f"Dear Recipient,\n\n"
@@ -131,7 +131,7 @@ def check_inbox(max_messages: int = 5) -> str:
         mail.logout()
         return f"📬 **Recent Unread Messages ({len(summaries)} found):**\n\n" + "\n".join(summaries)
     except Exception as exc:
-        logger.warning("[email_agent] IMAP read failed: %s", exc)
+        logger.warning("[email_agent] IMAP read failed: %s", type(exc).__name__)
         return f"⚠️ Could not check live inbox: {exc}. Verify EMAIL_ADDRESS and EMAIL_APP_PASSWORD in .env."
 
 
@@ -142,7 +142,7 @@ def handle(command: str, metadata: Optional[dict[str, Any]] = None) -> AgentResu
       - Reads: inbox check, summarization, draft generation (free)
       - Writes: send requests return action_type="send_email" (gated)
     """
-    logger.info("[email_agent] Processing command: %.80s", command)
+    logger.info("[email_agent] Processing request")
     lower = command.lower().strip()
     meta = dict(metadata or {})
 

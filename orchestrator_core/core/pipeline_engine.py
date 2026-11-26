@@ -173,7 +173,7 @@ def _run_pipeline(
                 "UPDATE pipeline_runs SET status = 'failed', completed_at = ?, error = ? WHERE run_id = ?",
                 (datetime.now(timezone.utc).isoformat(), str(exc), run_id),
             )
-        logger.exception("Pipeline failed — run_id=%s", run_id)
+        logger.error("Pipeline failed — run_id=%s", run_id)
         raise
 
     return run_id

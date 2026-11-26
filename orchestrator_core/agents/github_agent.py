@@ -57,7 +57,7 @@ def _call_llm(prompt: str) -> str:
         )
         return response.choices[0].message.content
     except Exception as exc:
-        logger.warning("[github_agent] Groq call failed (%s) — providing fallback response.", exc)
+        logger.warning("[github_agent] Groq call failed (%s) — providing fallback response.", type(exc).__name__)
         return (
             "### GitHub Recommendations & Documentation\n\n"
             "- **Target Repository**: `orchestrater_agent`\n"
@@ -87,7 +87,7 @@ def _api_get(endpoint: str) -> Any:
         logger.warning("[github_agent] GitHub API %s returned status %d", endpoint, resp.status_code)
         return None
     except Exception as exc:
-        logger.warning("[github_agent] GitHub API request error: %s", exc)
+        logger.warning("[github_agent] GitHub API request error: %s", type(exc).__name__)
         return None
 
 
@@ -108,7 +108,7 @@ def handle(command: str, metadata: Optional[dict[str, Any]] = None) -> AgentResu
       - Reads: listing repos, summaries, commit messages, READMEs, PR reviews (free)
       - Writes: creating issues, commenting, pushing (gated behind approval)
     """
-    logger.info("[github_agent] Processing command: %.80s", command)
+    logger.info("[github_agent] Processing request")
     lower = command.lower().strip()
     meta = dict(metadata or {})
 

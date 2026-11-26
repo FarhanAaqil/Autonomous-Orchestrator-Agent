@@ -85,7 +85,7 @@ def _call_llm(prompt: str) -> str:
     except Exception as exc:
         err_msg = str(exc).lower()
         if "api_key" in err_msg or "401" in err_msg or "unauthorized" in err_msg or "invalid api key" in err_msg:
-            logger.warning("[critic_agent] Groq auth error: %s — providing structured demo output.", exc)
+            logger.warning("[critic_agent] Groq auth error: %s — providing structured demo output.", type(exc).__name__)
             return (
                 '{"score": 8.5, "strengths": ["Clear technical architecture", "Strong concurrency guarantees"], '
                 '"issues": ["Configure valid GROQ_API_KEY in .env for dynamic scoring"], '
@@ -113,7 +113,7 @@ def handle(command: str, metadata: Optional[dict[str, Any]] = None) -> AgentResu
     When the command contains content to critique, applies the structured critique
     standard. Otherwise passes the command straight to the LLM for general critique.
     """
-    logger.info("[critic_agent] Processing command: %.80s", command)
+    logger.info("[critic_agent] Processing request")
 
     content_type = _detect_content_type(command)
     standard = CRITIQUE_STANDARDS.get(content_type, CRITIQUE_STANDARDS["email"])

@@ -73,5 +73,5 @@ def fetch_page(url: str, max_chars: int = 8000) -> str:
         hostname = urlparse(url).hostname or "web_page"
         return sanitize_observation(raw_text, source=hostname, max_chars=max_chars)
     except Exception as exc:
-        logger.warning("fetch_page failed for %s: %s", url, exc)
+        logger.warning("fetch_page failed: %s", type(exc).__name__)
         return sanitize_observation(f"Error fetching page {url}: {exc}", source="fetch_page")

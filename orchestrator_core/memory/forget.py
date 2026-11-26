@@ -54,7 +54,7 @@ def forget(
             coll.delete(ids=[item_id])
             logger.info("[memory] Purged vector for memory item %s from ChromaDB.", item_id)
         except Exception as exc:
-            logger.warning("[memory] Vector purge failed for item %s: %s", item_id, exc)
+            logger.warning("[memory] Vector purge failed for item %s: %s", item_id, type(exc).__name__)
 
     logger.info("[memory] Forgotten memory item %s successfully.", item_id)
     return True
