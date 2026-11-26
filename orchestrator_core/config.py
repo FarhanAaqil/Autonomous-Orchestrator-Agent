@@ -76,15 +76,6 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("devto_api_key", "DEVTO_API_KEY"),
     )
-    linkedin_email: Optional[str] = Field(
-        default=None,
-        validation_alias=AliasChoices("linkedin_email", "LINKEDIN_EMAIL"),
-    )
-    linkedin_password: Optional[str] = Field(
-        default=None,
-        validation_alias=AliasChoices("linkedin_password", "LINKEDIN_PASSWORD"),
-    )
-
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
