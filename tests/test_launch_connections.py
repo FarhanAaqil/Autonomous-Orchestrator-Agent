@@ -58,3 +58,28 @@ def test_plan_grants_require_admin_and_expire_without_scheduler(db, owners):
     db.commit()
     assert account_plan(db, alice)['plan'] == 'free'
     assert account_plan(db, alice)['expired']
+
+
+@pytest.mark.parametrize('provider,response', [('devto', {'id': 1}), ('hashnode', {'data': {'me': {'id': 'one'}}}), ('groq', {'data': []})])
+def test_personal_token_validation_uses_fixed_provider_endpoints(monkeypatch, provider, response):
+    from unittest.mock import Mock
+    from orchestrator_core.core.connections import validate_personal_token
+    reply = Mock(status_code=200)
+    reply.json.return_value = response
+    call = Mock(return_value=reply)
+    monkeypatch.setattr('requests.get', call)
+    monkeypatch.setattr('requests.post', call)
+    assert validate_personal_token(provider, 'private-fixture-token') == {'access_token': 'private-fixture-token'}
+    assert call.call_args.kwargs['allow_redirects'] is False
+    assert call.call_args.kwargs['timeout'] == 15
+
+
+def test_personal_token_errors_do_not_expose_secrets(monkeypatch):
+    import requests
+    from orchestrator_core.core.connections import validate_personal_token
+    def fail(*args, **kwargs):
+        raise requests.RequestException('private-fixture-token')
+    monkeypatch.setattr('requests.get', fail)
+    with pytest.raises(ConnectionUnavailable) as error:
+        validate_personal_token('devto', 'private-fixture-token')
+    assert 'private-fixture-token' not in str(error.value)

@@ -103,22 +103,9 @@ def handle(command: str, metadata: Optional[dict[str, Any]] = None) -> AgentResu
 
     # 1. Gated Write Check: Post to LinkedIn
     if any(k in lower for k in ("post on linkedin", "share on linkedin", "publish to linkedin", "post update")):
-        action_type = "linkedin_post"
-        prompt = f"Draft an engaging, technical LinkedIn post ready for publishing based on: {command}"
+        prompt = f"Draft a LinkedIn post for the user to review and copy manually: {command}"
         post_draft = _call_llm(prompt)
-        payload = {"content": post_draft}
-        meta["approval_payload"] = payload
-        meta["action_type"] = action_type
-        return AgentResult(
-            agent="linkedin_agent",
-            output=(
-                f"🔒 **LinkedIn Post Requires Approval**\n\n"
-                f"{post_draft}\n\n"
-                f"---\n*Action queued for review in the Approval Gate.*"
-            ),
-            action_type=action_type,
-            metadata=meta,
-        )
+        return AgentResult(agent="linkedin_agent", output=post_draft + "\n\nDraft only. Review and copy this into LinkedIn yourself.", metadata={**meta, "draft_only": True})
 
     # 2. Free Read: Recruiter / profile search
     if any(k in lower for k in ("search recruiter", "find recruiter", "search linkedin", "find people", "find hiring manager")):

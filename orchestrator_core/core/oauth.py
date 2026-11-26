@@ -7,7 +7,7 @@ import secrets
 from datetime import timedelta
 from urllib.parse import urlencode
 import requests
-from orchestrator_core.core.connections import ConnectionUnavailable, keyring, store_connection
+from orchestrator_core.core.connections import ConnectionUnavailable, keyring, store_connection, require_connection_capacity
 from orchestrator_core.core.identity import digest, now
 from orchestrator_core.storage.transactions import transaction
 
@@ -40,11 +40,12 @@ def configuration(provider):
 def require_email_beta(db, owner):
     row = db.execute('SELECT email FROM users WHERE id=? AND active=1', (owner,)).fetchone()
     allowed = {value.strip().lower() for value in os.getenv('GMAIL_BETA_EMAILS', '').split(',') if value.strip()}
-    if not row or row['email'].lower() not in allowed:
+    if not row or (row['email'] or '').lower() not in allowed:
         raise ConnectionUnavailable('Gmail is in private beta; ask the administrator for access')
 
 
 def begin(db, owner, provider, session):
+    require_connection_capacity(db, owner, provider)
     config = configuration(provider)
     if not session:
         raise ConnectionUnavailable('Sign in again before connecting an account')

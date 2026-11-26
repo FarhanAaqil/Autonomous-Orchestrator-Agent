@@ -46,10 +46,45 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        put?: never;
+        /** Save Personal Token */
+        put: operations["save_personal_token_account_connections__provider__put"];
         post?: never;
         /** Disconnect Provider */
         delete: operations["disconnect_provider_account_connections__provider__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/account/connections/{provider}/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Finish Connection */
+        get: operations["finish_connection_account_connections__provider__callback_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/account/connections/{provider}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Connection */
+        post: operations["start_connection_account_connections__provider__start_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1698,6 +1733,14 @@ export interface components {
             /** New Password */
             new_password: string;
         };
+        /** PersonalToken */
+        PersonalToken: {
+            /**
+             * Token
+             * Format: password
+             */
+            token: string;
+        };
         /**
          * PipelineRequest
          * @description Body for POST /pipeline/{name}.
@@ -1980,7 +2023,107 @@ export interface operations {
             };
         };
     };
+    save_personal_token_account_connections__provider__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PersonalToken"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     disconnect_provider_account_connections__provider__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    finish_connection_account_connections__provider__callback_get: {
+        parameters: {
+            query?: {
+                state?: string;
+                code?: string;
+            };
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_connection_account_connections__provider__start_post: {
         parameters: {
             query?: never;
             header?: never;

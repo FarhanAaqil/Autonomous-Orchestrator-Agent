@@ -1,7 +1,7 @@
 """Personal account metadata, usage, and manually administered plan expiry."""
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 from orchestrator_core.core.ownership import request_owner
 from orchestrator_core.core.plans import account_plan, usage_summary, grant_plan
 from orchestrator_core.core.connections import list_connections, disconnect
@@ -70,3 +70,19 @@ def finish_connection(provider: str, request: Request, state: str = '', code: st
     except ConnectionUnavailable as exc:
         raise HTTPException(400, str(exc)) from None
     return RedirectResponse('/#connection=complete', status_code=303, headers={'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer'})
+
+
+class PersonalToken(BaseModel):
+    token: SecretStr
+
+
+@router.put('/connections/{provider}')
+def save_personal_token(provider: str, body: PersonalToken, db=Depends(get_db_connection), owner=Depends(personal_owner)):
+    from orchestrator_core.core.connections import validate_personal_token, store_connection, require_connection_capacity, ConnectionUnavailable
+    try:
+        require_connection_capacity(db, owner, provider)
+        secret = validate_personal_token(provider, body.token.get_secret_value())
+        store_connection(db, owner, provider, secret, [])
+    except ConnectionUnavailable as exc:
+        raise HTTPException(400, str(exc)) from None
+    return {'connected': True, 'provider': provider}

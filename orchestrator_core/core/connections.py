@@ -23,6 +23,15 @@ def keyring():
         raise ConnectionUnavailable('Provider connections are not configured') from None
 
 
+def require_connection_capacity(db, user_id, provider):
+    from orchestrator_core.core.plans import require_capacity
+    if not db.execute('SELECT 1 FROM users WHERE id=? AND active=1', (user_id,)).fetchone():
+        raise ConnectionUnavailable('Account is unavailable')
+    keyring()
+    count = db.execute('SELECT COUNT(*) FROM connections WHERE user_id=? AND provider<>?', (user_id, provider)).fetchone()[0]
+    require_capacity(db, user_id, 'connected_accounts', count)
+
+
 def store_connection(db, user_id, provider, secret, scopes):
     if provider not in PROVIDERS or not isinstance(secret, dict) or not secret:
         raise ValueError('Unsupported provider or empty credentials')
@@ -73,5 +82,29 @@ def list_connections(db, user_id):
 
 def disconnect(db, user_id, provider):
     with db:
+        db.execute('DELETE FROM oauth_states WHERE user_id=? AND provider=?', (user_id, provider))
         db.execute('DELETE FROM connections WHERE user_id=? AND provider=?', (user_id, provider))
         log_audit(db, user_id, 'provider_disconnected', 'connection', provider)
+
+
+def validate_personal_token(provider, token):
+    import requests
+    from orchestrator_core.core.oauth import json_response
+    if provider not in ('devto', 'hashnode', 'groq') or not 8 <= len(token) <= 8192:
+        raise ConnectionUnavailable('Choose a supported provider and enter a valid token')
+    try:
+        if provider == 'devto':
+            data = json_response(requests.get('https://dev.to/api/users/me', headers={'api-key': token, 'Accept': 'application/vnd.forem.api-v1+json'}, timeout=15, allow_redirects=False))
+            if not data.get('id'):
+                raise ConnectionUnavailable('The token did not identify an account')
+        elif provider == 'hashnode':
+            data = json_response(requests.post('https://gql-beta.hashnode.com', json={'query': 'query { me { id } }'}, headers={'Authorization': 'Bearer '+token, 'x-hashnode-client': 'toji'}, timeout=15, allow_redirects=False))
+            if not (data.get('data') or {}).get('me'):
+                raise ConnectionUnavailable('The token did not identify an account')
+        else:
+            data = json_response(requests.get('https://api.groq.com/openai/v1/models', headers={'Authorization': 'Bearer '+token}, timeout=15, allow_redirects=False))
+            if not isinstance(data.get('data'), list):
+                raise ConnectionUnavailable('The model provider did not validate this key')
+    except requests.RequestException:
+        raise ConnectionUnavailable('Could not validate the token with its provider') from None
+    return {'access_token': token}
