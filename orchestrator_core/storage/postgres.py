@@ -41,34 +41,72 @@ class Connection:
         self.release = release
         self.closed = False
         self._contexts = []
+        self._transaction_owner = None
 
     @property
     def in_transaction(self):
         return self.raw.info.transaction_status != TransactionStatus.IDLE
 
+    def _bind_owner(self):
+        from orchestrator_core.core.ownership import execution_owner
+        owner = execution_owner.get() or ''
+        if self._transaction_owner is not None and self._transaction_owner != owner:
+            raise RuntimeError('Cannot change account inside a database transaction')
+        if self._transaction_owner is None:
+            self.raw.execute("SELECT set_config('app.user_id', %s, true)", (owner,))
+            self._transaction_owner = owner
+
     def execute(self, sql, params=()):
-        if sql.strip().rstrip(';').upper() == 'BEGIN IMMEDIATE':
+        statement = sql.strip().rstrip(';').upper()
+        if statement in ('BEGIN IMMEDIATE', 'BEGIN'):
             self.raw.execute('BEGIN')
-            return self.raw.execute('SELECT pg_advisory_xact_lock(74201901)')
+            self._transaction_owner = None
+            self._bind_owner()
+            if statement == 'BEGIN IMMEDIATE':
+                return self.raw.execute('SELECT pg_advisory_xact_lock(74201901)')
+            return self.raw.execute('SELECT 1')
+        if not self.in_transaction:
+            self._transaction_owner = None
+            with self.raw.transaction():
+                self._bind_owner()
+                result = self.raw.execute(parameters(sql) if params else sql, params or None)
+            self._transaction_owner = None
+            return result
+        self._bind_owner()
         return self.raw.execute(parameters(sql) if params else sql, params or None)
 
     def executemany(self, sql, params):
-        return self.raw.cursor().executemany(parameters(sql), params)
+        with self:
+            return self.raw.cursor().executemany(parameters(sql), params)
 
     def commit(self):
         self.raw.commit()
+        self._transaction_owner = None
 
     def rollback(self):
         self.raw.rollback()
+        self._transaction_owner = None
 
     def __enter__(self):
+        if not self.in_transaction:
+            self._transaction_owner = None
         tx = self.raw.transaction()
         tx.__enter__()
+        try:
+            self._bind_owner()
+        except BaseException:
+            import sys
+            tx.__exit__(*sys.exc_info())
+            raise
         self._contexts.append(tx)
         return self
 
     def __exit__(self, *exc):
-        return self._contexts.pop().__exit__(*exc)
+        try:
+            return self._contexts.pop().__exit__(*exc)
+        finally:
+            if not self.in_transaction:
+                self._transaction_owner = None
 
     def close(self):
         if not self.closed:

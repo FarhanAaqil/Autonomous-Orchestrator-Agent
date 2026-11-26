@@ -62,7 +62,17 @@ def _tick():
     from orchestrator_core.storage.db import get_db
     db = get_db()
     try:
-        tick(db)
+        if getattr(db, 'dialect', None) == 'postgresql':
+            from orchestrator_core.core.ownership import execution_owner
+            owners = db.execute('SELECT id FROM users WHERE active=1 ORDER BY id').fetchall()
+            for owner in owners:
+                marker = execution_owner.set(owner['id'])
+                try:
+                    tick(db)
+                finally:
+                    execution_owner.reset(marker)
+        else:
+            tick(db)
     finally:
         db.close()
 

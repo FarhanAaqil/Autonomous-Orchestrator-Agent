@@ -63,55 +63,76 @@ class Worker:
             own_db = True
 
         try:
-            # 1. Kill switch check
-            row_ks = db.execute("SELECT value FROM system_flags WHERE key = 'kill_switch'").fetchone()
-            if row_ks and row_ks["value"].strip().lower() == "on":
-                logger.debug("Worker %s: kill switch is active. Skipping job claim.", self.worker_id)
-                return False
-
-            # 2. Reap zombies
-            reaped = reap_zombies(db, timeout_seconds=self.zombie_timeout)
-            from orchestrator_core.jobs.dependencies import reconcile
-            reconcile(db)
-            if reaped:
-                logger.info("Worker %s: reaped %d zombie jobs", self.worker_id, len(reaped))
-
-            # 3. Claim job
-            job = JobService.claim_job(self.worker_id, db)
-            if job is None:
-                return False
-
-            # 4. Execute claimed job
-            from orchestrator_core.runner.loop import run_job
-            if job.work_kind != 'agent':
-                from orchestrator_core.jobs.background import run_background_job
-                run_job = run_background_job
-
-            logger.info("Worker %s executing claimed job %s (agent=%s)", self.worker_id, job.id, job.agent)
-            renewal_stop = threading.Event()
-            def renew():
-                # A distinct connection keeps leases alive during provider calls.
-                while not renewal_stop.wait(15):
-                    heartbeat_db = get_db(self.db_path)
+            from orchestrator_core.core.ownership import execution_owner
+            if getattr(db, 'dialect', None) == 'postgresql' and execution_owner.get() is None:
+                owners = [row['id'] for row in db.execute('SELECT id FROM users WHERE active=1 ORDER BY id').fetchall()]
+                if not owners:
+                    return False
+                start = getattr(self, '_owner_cursor', 0) % len(owners)
+                for offset in range(len(owners)):
+                    index = (start + offset) % len(owners)
+                    marker = execution_owner.set(owners[index])
                     try:
-                        if not JobService.heartbeat(job.id, self.worker_id, heartbeat_db, job.lease_generation):
-                            return
+                        if self._run_cycle(db, own_db):
+                            self._owner_cursor = index + 1
+                            return True
                     finally:
-                        heartbeat_db.close()
-            renewer = threading.Thread(target=renew, daemon=True)
-            if own_db:
-                renewer.start()
-            try:
-                run_job(job=job, db=db, llm_client=self.llm_client,
-                        worker_id=self.worker_id, tool_registry=self.tool_registry)
-            finally:
-                renewal_stop.set()
-                if own_db:
-                    renewer.join(timeout=6)
-            return True
+                        execution_owner.reset(marker)
+                self._owner_cursor = start + 1
+                return False
+            return self._run_cycle(db, own_db)
         finally:
             if own_db:
                 db.close()
+
+    def _run_cycle(self, db, own_db):
+        # 1. Kill switch check
+        row_ks = db.execute("SELECT value FROM system_flags WHERE key = 'kill_switch'").fetchone()
+        if row_ks and row_ks["value"].strip().lower() == "on":
+            logger.debug("Worker %s: kill switch is active. Skipping job claim.", self.worker_id)
+            return False
+
+        # 2. Reap zombies
+        reaped = reap_zombies(db, timeout_seconds=self.zombie_timeout)
+        from orchestrator_core.jobs.dependencies import reconcile
+        reconcile(db)
+        if reaped:
+            logger.info("Worker %s: reaped %d zombie jobs", self.worker_id, len(reaped))
+
+        # 3. Claim job
+        job = JobService.claim_job(self.worker_id, db)
+        if job is None:
+            return False
+
+        # 4. Execute claimed job
+        from orchestrator_core.runner.loop import run_job
+        if job.work_kind != 'agent':
+            from orchestrator_core.jobs.background import run_background_job
+            run_job = run_background_job
+
+        logger.info("Worker %s executing claimed job %s (agent=%s)", self.worker_id, job.id, job.agent)
+        renewal_stop = threading.Event()
+        def renew():
+            # A distinct connection keeps leases alive during provider calls.
+            while not renewal_stop.wait(15):
+                heartbeat_db = get_db(self.db_path)
+                try:
+                    if not JobService.heartbeat(job.id, self.worker_id, heartbeat_db, job.lease_generation):
+                        return
+                finally:
+                    heartbeat_db.close()
+        from contextvars import copy_context
+        renewer = threading.Thread(target=copy_context().run, args=(renew,), daemon=True)
+        if own_db:
+            renewer.start()
+        try:
+            run_job(job=job, db=db, llm_client=self.llm_client,
+                    worker_id=self.worker_id, tool_registry=self.tool_registry)
+        finally:
+            renewal_stop.set()
+            if own_db:
+                renewer.join(timeout=6)
+        return True
 
     def run_forever(self) -> None:
         """Main worker loop running until stopped."""
