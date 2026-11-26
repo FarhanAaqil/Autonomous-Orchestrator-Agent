@@ -73,3 +73,12 @@ def test_monthly_limit_includes_prior_days_and_personal_keys(db, monkeypatch, pe
         with pytest.raises(PlanLimitExceeded, match='monthly tokens'):
             reserve(db, [], 100, personal_key=personal_key)
     assert db.execute('SELECT COUNT(*) FROM provider_usage').fetchone()[0] == 1
+
+
+def test_public_payment_link_requires_https(monkeypatch):
+    from orchestrator_core.routes.auth import public_plans
+    for value in ('javascript:alert(1)', 'http://example.org/pay', 'https://user:secret@example.org/pay'):
+        monkeypatch.setenv('UPGRADE_PAYMENT_URL', value)
+        assert public_plans()['payment_url'] is None
+    monkeypatch.setenv('UPGRADE_PAYMENT_URL', 'https://payments.example.org/upgrade')
+    assert public_plans()['payment_url'] == 'https://payments.example.org/upgrade'

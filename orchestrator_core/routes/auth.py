@@ -217,3 +217,15 @@ def confirm_password_reset(body: ResetChallenge, request: Request, db=Depends(ge
 @router.get('/options')
 def account_options():
     return {'registration': get_settings().public_registration}
+
+
+@router.get('/plans')
+def public_plans():
+    import os
+    from urllib.parse import urlsplit
+    from orchestrator_core.core.plans import PLANS
+    payment = os.getenv('UPGRADE_PAYMENT_URL', '').strip()
+    parsed = urlsplit(payment)
+    if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password:
+        payment = None
+    return {'plans': PLANS, 'payment_url': payment, 'payment_note': 'Plan activation is manual after administrator confirmation of payment. The payment page shows the price and terms.'}

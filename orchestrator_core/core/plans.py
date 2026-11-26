@@ -93,6 +93,7 @@ def usage_summary(db, user_id):
     return {
         'day_utc': day,
         'month_utc': day[:7],
+        'monthly_runs': db.execute('SELECT COUNT(*) FROM jobs WHERE user_id=? AND substr(created_at,1,7)=?', (user_id, day[:7])).fetchone()[0],
         'monthly_tokens': db.execute('SELECT COALESCE(SUM(COALESCE(tokens_in+tokens_out,reserved_tokens)),0) FROM provider_usage WHERE user_id=? AND substr(used_at,1,7)=?', (user_id, day[:7])).fetchone()[0],
         'runs': db.execute('SELECT COUNT(*) FROM jobs WHERE user_id=? AND substr(created_at,1,10)=?', (user_id, day)).fetchone()[0],
         'tokens': db.execute('SELECT COALESCE(SUM(COALESCE(tokens_in+tokens_out,reserved_tokens)),0) FROM provider_usage WHERE user_id=? AND substr(used_at,1,10)=?', (user_id, day)).fetchone()[0],

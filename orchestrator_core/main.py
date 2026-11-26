@@ -288,7 +288,7 @@ async def plan_limit_error(request, exc):
 
 from orchestrator_core.core.ownership import request_execution_scope
 from orchestrator_core.core.admission import admit_request
-auth_dependencies = [Depends(request_execution_scope), Depends(admit_request)]
+auth_dependencies = [Depends(verify_bearer_token), Depends(request_execution_scope), Depends(admit_request)]
 from orchestrator_core.routes.auth import router as auth_router
 app.include_router(auth_router)
 from orchestrator_core.routes.account import router as account_router

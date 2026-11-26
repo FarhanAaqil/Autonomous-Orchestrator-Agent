@@ -107,3 +107,13 @@ def execution_preference(body: ExecutionPreference, db=Depends(get_db_connection
         db.execute("UPDATE approvals SET status='superseded',version=version+1 WHERE user_id=? AND status IN ('pending','approved') AND execution_mode<>?", (owner, body.mode))
         log_audit(db, owner, 'execution_preference_changed', 'user', owner, {'mode': body.mode})
     return {'mode': body.mode}
+
+
+@router.get('/users/{user_id}/summary')
+def administrator_summary(user_id: str, db=Depends(get_db_connection), owner=Depends(personal_owner)):
+    if not db.execute("SELECT 1 FROM users WHERE id=? AND active=1 AND role='administrator'", (owner,)).fetchone():
+        raise HTTPException(403, 'Administrator required')
+    try:
+        return {**account_plan(db, user_id), 'usage': usage_summary(db, user_id)}
+    except ValueError:
+        raise HTTPException(404, 'Active account not found') from None

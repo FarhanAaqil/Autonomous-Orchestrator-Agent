@@ -1,3 +1,4 @@
+import { Pricing } from './Product';
 import { useAction, useResource } from './hooks';
 import { useState } from 'react';
 import type { Props } from './pages';
@@ -44,7 +45,7 @@ export function Settings({user, tick}: Props) {
   const [passwordNotice, setPasswordNotice] = useState('');
   const paused = flags.data.find(f => f.key === 'kill_switch')?.value === 'on';
   return <><PageHead eyebrow="A WORKSPACE THAT WORKS FOR YOU" title="Stay in control."/><Banner error={flags.error || agents.error || action.error} notice={action.notice || passwordNotice}/>
-    <AccountUsage tick={tick}/><PersonalConnections tick={tick}/>
+    <AccountUsage tick={tick}/><Pricing/><PersonalConnections tick={tick}/>
     <section className="panel"><h2>Service diagnostics</h2>{ready.error ? <p role="alert" className="banner error">A required service is unavailable. Check Docker Compose logs and retry.</p> : Object.entries(ready.data).map(([name, ok]) => <div className="list-row" key={name}><span>{name}</span><Pill value={ok ? 'ready' : 'unavailable'}/></div>)}<button onClick={ready.reload}>Check again</button></section>
     <section className="panel"><h2>Automation & budget</h2><p>Automation is currently <strong>{paused ? 'paused' : 'active'}</strong>. Pausing prevents new work; it cannot undo an external action already submitted.</p>{user.role === 'administrator' ? <><button disabled={action.busy || flags.loading || !!flags.error} className={paused ? 'primary' : ''} onClick={() => {if (paused && !confirm('Resume automation? Queued work may start and use model budget.')) return; void action.act('/system/kill-switch', 'POST', {on: !paused});}}>{paused ? 'Resume automation' : 'Pause automation'}</button><Form busy={action.busy} label="Update daily budget" onSubmit={f => action.act('/system/budget', 'POST', {daily_budget_usd: Number(f.get('budget'))})}><Field label="Daily accounting budget (USD)" name="budget" type="number" value={flags.data.find(f => f.key === 'daily_budget_usd')?.value || '5'}/></Form></> : <p className="banner">Only administrators can change automation and budget settings.</p>}</section>
     <section className="panel"><h2>Agent availability</h2>{agents.data.map(a => <div className="list-row" key={a.id}><div><h3>{a.name}</h3><Pill value={a.is_active ? a.status : 'disabled'}/></div>{user.role === 'administrator' && <button disabled={action.busy} onClick={() => action.act('/agents/' + a.id, 'PATCH', {is_active: !a.is_active})}>{a.is_active ? 'Disable' : 'Enable'} {a.name}</button>}</div>)}</section>
@@ -59,11 +60,11 @@ function Accounts() {
   type Account = {id: string; username: string; role: string; active: boolean};
   const list = useResource<Account[]>('/auth/users', []); const action = useAction(list.reload);
   return <section className="panel"><h2>Workspace accounts</h2><p className="small">Manage account access and administrative roles here. Public registration remains a separate launch setting.</p><Banner error={list.error || action.error} notice={action.notice}/><Form busy={action.busy} label="Create account" onSubmit={f => action.act('/auth/users', 'POST', {username: f.get('username'), password: f.get('password'), role: f.get('role')})}><Field label="New username" name="username"/><Field label="Initial password (14+ characters)" name="password" type="password" minLength={14}/><label>Role<select name="role"><option>viewer</option><option>operator</option><option>administrator</option></select></label></Form>
-    {list.data.map(a => <div className="list-row" key={a.id}><div><h3>{a.username}</h3><Pill value={a.active ? a.role : 'disabled'}/></div><div className="actions"><label>Role for {a.username}<select value={a.role} disabled={action.busy} onChange={e => action.act('/auth/users/' + a.id, 'PATCH', {role: e.target.value, active: !!a.active})}><option>viewer</option><option>operator</option><option>administrator</option></select></label><button disabled={action.busy} onClick={() => action.act('/auth/users/' + a.id, 'PATCH', {role: a.role, active: !a.active})}>{a.active ? 'Disable' : 'Enable'} account</button></div></div>)}</section>;
+    {list.data.map(a => <div className="list-row" key={a.id}><div><h3>{a.username}</h3><Pill value={a.active ? a.role : 'disabled'}/></div><div className="actions"><label>Role for {a.username}<select value={a.role} disabled={action.busy} onChange={e => action.act('/auth/users/' + a.id, 'PATCH', {role: e.target.value, active: !!a.active})}><option>viewer</option><option>operator</option><option>administrator</option></select></label><button disabled={action.busy} onClick={() => action.act('/auth/users/' + a.id, 'PATCH', {role: a.role, active: !a.active})}>{a.active ? 'Disable' : 'Enable'} account</button>{a.active && <PlanEditor id={a.id} username={a.username}/>}</div></div>)}</section>;
 }
 
 function AccountUsage({tick}: {tick: number}) {
-  type Summary = {plan: string; paid_until: string | null; expired: boolean; execution_mode: string; limits: Record<string, number>; usage: {day_utc: string; runs: number; tokens: number; monthly_tokens: number; active_schedules: number; connected_accounts: number}};
+  type Summary = {plan: string; paid_until: string | null; expired: boolean; execution_mode: string; limits: Record<string, number>; usage: {day_utc: string; runs: number; tokens: number; monthly_runs: number; monthly_tokens: number; active_schedules: number; connected_accounts: number}};
   const account = useResource<Summary | null>('/account', null, tick);
   const preference = useAction(account.reload);
   const data = account.data;
@@ -74,19 +75,32 @@ function AccountUsage({tick}: {tick: number}) {
     {data.plan === 'pro' && data.paid_until && <p>Paid through {new Date(data.paid_until).toLocaleDateString()}.</p>}
     <p className="small">Daily usage resets at midnight UTC. Interrupted model calls retain their reservation until usage is known.</p>
     {([['Runs today', data.usage.runs, data.limits.runs_per_day], ['Model tokens today', data.usage.tokens, data.limits.daily_tokens], ['Model tokens this month', data.usage.monthly_tokens, data.limits.monthly_tokens], ['Active schedules', data.usage.active_schedules, data.limits.active_schedules], ['Connected accounts', data.usage.connected_accounts, data.limits.connected_accounts]] as const).map(([label, used, limit]) => <div className="list-row" key={label}><span>{label}</span><span>{used.toLocaleString()} / {limit.toLocaleString()}</span></div>)}
-    <p className="small">Usage date: {data.usage.day_utc} (UTC). Plan changes require administrator confirmation.</p>
+    <p className="small">Runs this month: {data.usage.monthly_runs}. Usage date: {data.usage.day_utc} (UTC). Plan changes require administrator confirmation.</p>
   </>}</section>;
 }
 
 function PersonalConnections({tick}: {tick: number}) {
-  type Connection = {provider: string; status: string};
+  type Connection = {provider: string; status: string; last_used_at: string | null};
   const list = useResource<Connection[]>('/account/connections', [], tick);
   const action = useAction(list.reload);
   const [formVersion, setFormVersion] = useState(0);
   const providers = [['github', 'GitHub'], ['gmail_read', 'Gmail reading (beta)'], ['gmail_send', 'Gmail sending (beta)'], ['devto', 'DEV Community'], ['hashnode', 'Hashnode'], ['groq', 'Your Groq key']] as const;
   return <section className="panel"><h2>Your connections</h2><p>Each connection belongs to your account. Reading and sending Gmail require separate consent and beta access. Connecting a provider does not publish or send anything.</p><Banner error={list.error || action.error} notice={action.notice}/>
     {providers.map(([id, label]) => {const connected = list.data.some(c => c.provider === id && c.status === 'connected'); return <div key={id} className="panel"><div className="section-title"><h3>{label}</h3><Pill value={connected ? 'connected' : 'not connected'}/></div>
-      {connected ? <button disabled={action.busy} onClick={() => {if (confirm('Disconnect ' + label + '? Future work will need a new connection.')) void action.act('/account/connections/' + id, 'DELETE');}}>Disconnect {label}</button> : ['github', 'gmail_read', 'gmail_send'].includes(id) ? <button disabled={action.busy} onClick={async () => {const result = await action.act('/account/connections/' + id + '/start'); if (result && typeof result.url === 'string') window.location.assign(result.url);}}>Connect {label}</button> : <Form key={formVersion} busy={action.busy} label={'Connect ' + label} onSubmit={async f => {const result = await action.act('/account/connections/' + id, 'PUT', {token: f.get('token')}); if (result) setFormVersion(v => v + 1);}}><Field label={label + ' personal token'} name="token" type="password"/><p className="small">Validated with the provider and encrypted at rest. Tokens are never shown again.</p></Form>}
+      {connected && <p className="small">Last used: {list.data.find(c => c.provider === id)?.last_used_at ? new Date(list.data.find(c => c.provider === id)!.last_used_at!).toLocaleString() : 'Not used yet'}</p>}{connected ? <button disabled={action.busy} onClick={() => {if (confirm('Disconnect ' + label + '? Future work will need a new connection.')) void action.act('/account/connections/' + id, 'DELETE');}}>Disconnect {label}</button> : ['github', 'gmail_read', 'gmail_send'].includes(id) ? <button disabled={action.busy} onClick={async () => {const result = await action.act('/account/connections/' + id + '/start'); if (result && typeof result.url === 'string') window.location.assign(result.url);}}>Connect {label}</button> : <Form key={formVersion} busy={action.busy} label={'Connect ' + label} onSubmit={async f => {const result = await action.act('/account/connections/' + id, 'PUT', {token: f.get('token')}); if (result) setFormVersion(v => v + 1);}}><Field label={label + ' personal token'} name="token" type="password"/><p className="small">Validated with the provider and encrypted at rest. Tokens are never shown again.</p></Form>}
     </div>;})}<p className="small">LinkedIn is draft only. Review and copy your draft into LinkedIn yourself.</p>
   </section>;
+}
+
+function PlanEditor({id, username}: {id: string; username: string}) {
+  const [open, setOpen] = useState(false);
+  return <><button onClick={() => setOpen(!open)}>{open ? 'Close plan details' : 'Plan & usage for ' + username}</button>{open && <PlanDetails id={id}/>}</>;
+}
+function PlanDetails({id}: {id: string}) {
+  type Details = {plan: string; paid_until: string | null; usage: {runs: number; tokens: number; monthly_tokens: number}};
+  const account = useResource<Details | null>('/account/users/' + id + '/summary', null);
+  const action = useAction(account.reload);
+  return <div className="panel"><Banner error={account.error || action.error} notice={action.notice}/>{account.data && <p>{account.data.plan} plan. Today: {account.data.usage.runs} runs, {account.data.usage.tokens} tokens. This month: {account.data.usage.monthly_tokens} tokens. Paid until: {account.data.paid_until || 'No paid period'}.</p>}
+    <Form busy={action.busy} label="Confirm paid plan" onSubmit={f => action.act('/account/users/' + id + '/plan', 'PUT', {plan: 'pro', paid_until: new Date(String(f.get('until'))).toISOString()})}><Field name="until" label="Paid through (your local time)" type="datetime-local"/><p className="small">Confirm payment independently before granting access.</p></Form>
+    <button disabled={action.busy} onClick={() => {if (confirm('Return this account to Free now?')) void action.act('/account/users/' + id + '/plan', 'PUT', {plan: 'free'});}}>Return to Free</button></div>;
 }

@@ -2380,6 +2380,51 @@
         ]
       }
     },
+    "/account/users/{user_id}/summary": {
+      "get": {
+        "operationId": "administrator_summary_account_users__user_id__summary_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Administrator Summary",
+        "tags": [
+          "Account"
+        ]
+      }
+    },
     "/agents": {
       "get": {
         "description": "Return the complete roster of orchestrator agents with live health and tool statuses.",
@@ -3215,6 +3260,25 @@
           }
         },
         "summary": "Request Password Reset",
+        "tags": [
+          "Authentication"
+        ]
+      }
+    },
+    "/auth/plans": {
+      "get": {
+        "operationId": "public_plans_auth_plans_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Public Plans",
         "tags": [
           "Authentication"
         ]
