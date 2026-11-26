@@ -56,3 +56,20 @@ def test_account_api_hides_private_fields_and_rejects_self_upgrade(db):
         assert client.put('/account/users/' + owner + '/plan', json={'plan': 'pro', 'paid_until': '2099-01-01T00:00:00+00:00'}, headers={'x-csrf-token': csrf}).status_code == 403
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize('personal_key', [False, True])
+def test_monthly_limit_includes_prior_days_and_personal_keys(db, monkeypatch, personal_key):
+    from orchestrator_core.core.policy import execution_scope
+    from orchestrator_core.core.usage import reserve
+    from datetime import datetime, timezone
+    owner = create_user(db, 'alice', 'fixture-password-123')['id']
+    monkeypatch.setitem(PLANS, 'free', {**PLANS['free'], 'monthly_tokens': 400})
+    with execution_scope('orchestrator', owner=owner):
+        reservation, _ = reserve(db, [], 100, personal_key=personal_key)
+        month = datetime.now(timezone.utc).strftime('%Y-%m')
+        with db:
+            db.execute('UPDATE provider_usage SET used_at=? WHERE id=?', (month + '-01T00:00:00+00:00', reservation))
+        with pytest.raises(PlanLimitExceeded, match='monthly tokens'):
+            reserve(db, [], 100, personal_key=personal_key)
+    assert db.execute('SELECT COUNT(*) FROM provider_usage').fetchone()[0] == 1

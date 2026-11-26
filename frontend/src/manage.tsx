@@ -63,7 +63,7 @@ function Accounts() {
 }
 
 function AccountUsage({tick}: {tick: number}) {
-  type Summary = {plan: string; paid_until: string | null; expired: boolean; execution_mode: string; limits: Record<string, number>; usage: {day_utc: string; runs: number; tokens: number; active_schedules: number; connected_accounts: number}};
+  type Summary = {plan: string; paid_until: string | null; expired: boolean; execution_mode: string; limits: Record<string, number>; usage: {day_utc: string; runs: number; tokens: number; monthly_tokens: number; active_schedules: number; connected_accounts: number}};
   const account = useResource<Summary | null>('/account', null, tick);
   const preference = useAction(account.reload);
   const data = account.data;
@@ -73,7 +73,7 @@ function AccountUsage({tick}: {tick: number}) {
     {data.expired && <p>Your paid period ended. Free plan limits now apply.</p>}
     {data.plan === 'pro' && data.paid_until && <p>Paid through {new Date(data.paid_until).toLocaleDateString()}.</p>}
     <p className="small">Daily usage resets at midnight UTC. Interrupted model calls retain their reservation until usage is known.</p>
-    {([['Runs today', data.usage.runs, data.limits.runs_per_day], ['Model tokens today', data.usage.tokens, data.limits.daily_tokens], ['Active schedules', data.usage.active_schedules, data.limits.active_schedules], ['Connected accounts', data.usage.connected_accounts, data.limits.connected_accounts]] as const).map(([label, used, limit]) => <div className="list-row" key={label}><span>{label}</span><span>{used.toLocaleString()} / {limit.toLocaleString()}</span></div>)}
+    {([['Runs today', data.usage.runs, data.limits.runs_per_day], ['Model tokens today', data.usage.tokens, data.limits.daily_tokens], ['Model tokens this month', data.usage.monthly_tokens, data.limits.monthly_tokens], ['Active schedules', data.usage.active_schedules, data.limits.active_schedules], ['Connected accounts', data.usage.connected_accounts, data.limits.connected_accounts]] as const).map(([label, used, limit]) => <div className="list-row" key={label}><span>{label}</span><span>{used.toLocaleString()} / {limit.toLocaleString()}</span></div>)}
     <p className="small">Usage date: {data.usage.day_utc} (UTC). Plan changes require administrator confirmation.</p>
   </>}</section>;
 }

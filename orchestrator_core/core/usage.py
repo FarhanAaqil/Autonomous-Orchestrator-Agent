@@ -36,6 +36,8 @@ def reserve(db, messages, output_limit, personal_key=False):
             from orchestrator_core.core.plans import require_capacity
             used = db.execute('SELECT COALESCE(SUM(COALESCE(tokens_in+tokens_out,reserved_tokens)),0) FROM provider_usage WHERE user_id=? AND substr(used_at,1,10)=?', (owner, timestamp[:10])).fetchone()[0]
             require_capacity(db, owner, 'daily_tokens', used, prompt + output_limit)
+            monthly = db.execute('SELECT COALESCE(SUM(COALESCE(tokens_in+tokens_out,reserved_tokens)),0) FROM provider_usage WHERE user_id=? AND substr(used_at,1,7)=?', (owner, timestamp[:7])).fetchone()[0]
+            require_capacity(db, owner, 'monthly_tokens', monthly, prompt + output_limit)
         cost = (prompt * INPUT_PER_MILLION + output_limit * OUTPUT_PER_MILLION) / 1_000_000
         limit_row = db.execute("SELECT value FROM system_flags WHERE key='daily_budget_usd'").fetchone()
         limit = float(limit_row[0]) if limit_row else 5.0

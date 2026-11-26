@@ -3,8 +3,8 @@ from datetime import datetime, timezone
 from orchestrator_core.storage.db import log_audit
 
 PLANS = {
-    'free': {'runs_per_day': 10, 'active_schedules': 1, 'connected_accounts': 2, 'daily_tokens': 20000, 'concurrent_runs': 1, 'emails_per_day': 10},
-    'pro': {'runs_per_day': 100, 'active_schedules': 10, 'connected_accounts': 8, 'daily_tokens': 200000, 'concurrent_runs': 3, 'emails_per_day': 100},
+    'free': {'runs_per_day': 10, 'active_schedules': 1, 'connected_accounts': 2, 'daily_tokens': 20000, 'monthly_tokens': 300000, 'concurrent_runs': 1, 'emails_per_day': 10},
+    'pro': {'runs_per_day': 100, 'active_schedules': 10, 'connected_accounts': 8, 'daily_tokens': 200000, 'monthly_tokens': 3000000, 'concurrent_runs': 3, 'emails_per_day': 100},
 }
 
 
@@ -92,6 +92,8 @@ def usage_summary(db, user_id):
     day = datetime.now(timezone.utc).date().isoformat()
     return {
         'day_utc': day,
+        'month_utc': day[:7],
+        'monthly_tokens': db.execute('SELECT COALESCE(SUM(COALESCE(tokens_in+tokens_out,reserved_tokens)),0) FROM provider_usage WHERE user_id=? AND substr(used_at,1,7)=?', (user_id, day[:7])).fetchone()[0],
         'runs': db.execute('SELECT COUNT(*) FROM jobs WHERE user_id=? AND substr(created_at,1,10)=?', (user_id, day)).fetchone()[0],
         'tokens': db.execute('SELECT COALESCE(SUM(COALESCE(tokens_in+tokens_out,reserved_tokens)),0) FROM provider_usage WHERE user_id=? AND substr(used_at,1,10)=?', (user_id, day)).fetchone()[0],
         'active_schedules': db.execute('SELECT COUNT(*) FROM schedules WHERE user_id=? AND is_active=1', (user_id,)).fetchone()[0],
