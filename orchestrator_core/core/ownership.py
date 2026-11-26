@@ -41,3 +41,11 @@ def require_owned_approval(db, approval_id, owner):
     row = db.execute("SELECT id FROM approvals WHERE id=? AND COALESCE(user_id,'')=?", (approval_id, owner or '')).fetchone()
     if not row:
         raise HTTPException(404, 'Approval not found')
+
+
+async def request_execution_scope(owner=Depends(request_owner)):
+    token = execution_owner.set(owner)
+    try:
+        yield owner
+    finally:
+        execution_owner.reset(token)

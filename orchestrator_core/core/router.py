@@ -241,7 +241,8 @@ def classify(command: str, use_cache: bool = True, allow_fallback: bool = True) 
     is OPEN (i.e., Groq has been failing repeatedly).
     Uses server-side in-memory caching to eliminate redundant LLM calls.
     """
-    cache_key = command.strip().lower()
+    from orchestrator_core.core.ownership import execution_owner
+    cache_key = str(execution_owner.get()) + ":" + command.strip().lower()
     if use_cache and allow_fallback and cache_key in _classification_cache:
         cached_time, cached_result = _classification_cache[cache_key]
         if time.monotonic() - cached_time < ROUTER_CACHE_TTL:

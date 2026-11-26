@@ -87,3 +87,6 @@ def migrate_extensions(conn):
             from orchestrator_core.storage.event_schema import install
             install(conn, owned=True)
             conn.execute('INSERT INTO application_migrations VALUES (14)')
+        if not conn.execute('SELECT 1 FROM application_migrations WHERE version=15').fetchone():
+            conn.execute('ALTER TABLE provider_usage ADD COLUMN personal_key INTEGER NOT NULL DEFAULT 0')
+            conn.execute('INSERT INTO application_migrations VALUES (15)')

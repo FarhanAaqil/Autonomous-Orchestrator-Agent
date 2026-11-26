@@ -14,7 +14,7 @@ INPUT_PER_MILLION = 10.0
 OUTPUT_PER_MILLION = 30.0
 
 
-def reserve(db, messages, output_limit):
+def reserve(db, messages, output_limit, personal_key=False):
     from orchestrator_core.core.ownership import execution_owner
     owner = execution_owner.get()
     prompt = len(json.dumps(messages, ensure_ascii=False).encode('utf-8')) + 256
@@ -40,10 +40,10 @@ def reserve(db, messages, output_limit):
         limit_row = db.execute("SELECT value FROM system_flags WHERE key='daily_budget_usd'").fetchone()
         limit = float(limit_row[0]) if limit_row else 5.0
         spent = db.execute('SELECT COALESCE(SUM(COALESCE(cost_usd,reserved_cost)),0) FROM provider_usage WHERE substr(used_at,1,10)=?', (timestamp[:10],)).fetchone()[0]
-        if spent + cost > limit:
+        if not personal_key and spent + cost > limit:
             raise BudgetExceededError(spent+cost, limit)
-        db.execute('INSERT INTO provider_usage (id,job_id,used_at,reserved_tokens,reserved_cost,state,user_id) VALUES (?,?,?,?,?,?,?)',
-                   (reservation, lease[0] if lease else None, timestamp, prompt+output_limit, cost, 'reserved', owner))
+        db.execute('INSERT INTO provider_usage (id,job_id,used_at,reserved_tokens,reserved_cost,state,user_id,personal_key) VALUES (?,?,?,?,?,?,?,?)',
+                   (reservation, lease[0] if lease else None, timestamp, prompt+output_limit, 0 if personal_key else cost, 'reserved', owner, int(personal_key)))
         db.commit()
     except BaseException:
         db.rollback()
@@ -58,5 +58,5 @@ def settle(db, reservation, usage):
     incoming, outgoing = usage.prompt_tokens, usage.completion_tokens
     cost = (incoming*INPUT_PER_MILLION + outgoing*OUTPUT_PER_MILLION) / 1_000_000
     with db:
-        db.execute("UPDATE provider_usage SET tokens_in=?,tokens_out=?,cost_usd=?,state='reported' WHERE id=? AND state='reserved'",
+        db.execute("UPDATE provider_usage SET tokens_in=?,tokens_out=?,cost_usd=CASE WHEN personal_key=1 THEN 0 ELSE ? END,state='reported' WHERE id=? AND state='reserved'",
                    (incoming, outgoing, cost, reservation))

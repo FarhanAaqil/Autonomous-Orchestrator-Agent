@@ -14,7 +14,7 @@ import sqlite3
 from typing import Any, Callable, Optional
 import uuid
 
-from groq import Groq
+from orchestrator_core.core.provider import Groq
 
 from orchestrator_core.config import get_settings
 from orchestrator_core.models import MemoryItemRecord

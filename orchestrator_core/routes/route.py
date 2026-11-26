@@ -28,7 +28,7 @@ def route_command(body: RouteRequest) -> RouterResult | ClarificationNeeded:
     Returns RouterResult when confidence >= ROUTER_CONFIDENCE_THRESHOLD,
     or ClarificationNeeded when it is below.
     """
-    logger.info("Routing command: %.80s", body.command)
+    logger.info("Routing request")
     result = classify(body.command)
-    logger.info("Route result: %s", result.model_dump())
+    logger.info("Routing completed")
     return result

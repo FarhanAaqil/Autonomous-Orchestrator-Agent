@@ -283,7 +283,8 @@ async def plan_limit_error(request, exc):
     return JSONResponse(status_code=429, content={'detail': str(exc)})
 
 
-auth_dependencies = [Depends(verify_bearer_token)]
+from orchestrator_core.core.ownership import request_execution_scope
+auth_dependencies = [Depends(request_execution_scope)]
 from orchestrator_core.routes.auth import router as auth_router
 app.include_router(auth_router)
 from orchestrator_core.routes.account import router as account_router
