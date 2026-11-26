@@ -84,7 +84,7 @@ _expensive_requests = asyncio.Semaphore(8)
 
 @app.middleware('http')
 async def bound_expensive_requests(request: Request, call_next):
-    expensive = request.method == 'POST' and request.url.path.startswith(('/dispatch', '/route', '/pipeline', '/auth/login', '/approvals'))
+    expensive = request.method == 'POST' and request.url.path.startswith(('/auth/login', '/auth/register', '/auth/password/reset'))
     if not expensive:
         return await call_next(request)
     try:
@@ -105,18 +105,15 @@ async def request_logging_middleware(request: Request, call_next):
     request_id = str(uuid.uuid4())[:8]
     t_start = time.monotonic()
 
-    logger.info(
-        "[%s] → %s %s",
-        request_id, request.method, request.url.path,
-    )
-
+    request.state.request_id = request_id
     response = await call_next(request)
-
     latency_ms = int((time.monotonic() - t_start) * 1000)
-    logger.info(
-        "[%s] ← %d  latency=%dms",
-        request_id, response.status_code, latency_ms,
-    )
+    import json
+    principal = getattr(request.state, 'principal', {})
+    logger.info(json.dumps({'event': 'http_request', 'request_id': request_id,
+                           'user_id': principal.get('id'), 'method': request.method,
+                           'status': response.status_code, 'latency_ms': latency_ms}))
+    response.headers['X-Request-ID'] = request_id
     return response
 
 
@@ -290,7 +287,8 @@ async def plan_limit_error(request, exc):
 
 
 from orchestrator_core.core.ownership import request_execution_scope
-auth_dependencies = [Depends(request_execution_scope)]
+from orchestrator_core.core.admission import admit_request
+auth_dependencies = [Depends(request_execution_scope), Depends(admit_request)]
 from orchestrator_core.routes.auth import router as auth_router
 app.include_router(auth_router)
 from orchestrator_core.routes.account import router as account_router
