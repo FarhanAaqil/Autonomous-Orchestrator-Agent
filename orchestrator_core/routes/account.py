@@ -117,3 +117,20 @@ def administrator_summary(user_id: str, db=Depends(get_db_connection), owner=Dep
         return {**account_plan(db, user_id), 'usage': usage_summary(db, user_id)}
     except ValueError:
         raise HTTPException(404, 'Active account not found') from None
+
+
+@router.get('/export')
+def export_account(db=Depends(get_db_connection), owner=Depends(personal_owner)):
+    from fastapi.responses import JSONResponse
+    from orchestrator_core.core.ownership import OWNED_TABLES
+    from orchestrator_core.core.identity import now
+    from orchestrator_core.storage.transactions import transaction
+    with transaction(db):
+        profile = db.execute('SELECT id,username,email,role,created_at,email_verified_at,plan,paid_until,execution_mode FROM users WHERE id=?', (owner,)).fetchone()
+        data = {'exported_at': now().isoformat(), 'profile': dict(profile), 'connections': list_connections(db, owner), 'records': {}}
+        for table in OWNED_TABLES:
+            rows = db.execute(f'SELECT * FROM {table} WHERE user_id=? LIMIT 50001', (owner,)).fetchall()
+            if len(rows) > 50000:
+                raise HTTPException(413, 'This account requires an administrator-assisted export; no partial export was produced')
+            data['records'][table] = [dict(row) for row in rows]
+    return JSONResponse(data, headers={'Content-Disposition': 'attachment; filename="toji-account.json"', 'Cache-Control': 'no-store'})

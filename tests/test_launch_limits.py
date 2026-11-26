@@ -82,3 +82,19 @@ def test_public_payment_link_requires_https(monkeypatch):
         assert public_plans()['payment_url'] is None
     monkeypatch.setenv('UPGRADE_PAYMENT_URL', 'https://payments.example.org/upgrade')
     assert public_plans()['payment_url'] == 'https://payments.example.org/upgrade'
+
+
+def test_export_contains_only_owned_records_and_no_credentials(db):
+    from orchestrator_core.routes.account import export_account
+    import json
+    alice = create_user(db, 'alice', 'fixture-password-123')['id']
+    bob = create_user(db, 'bob', 'fixture-password-123')['id']
+    JobService.create_job('general_chat', 'Private Alice work', db, owner=alice)
+    JobService.create_job('general_chat', 'Private Bob work', db, owner=bob)
+    response = export_account(db, alice)
+    result = json.loads(response.body)
+    assert result['profile']['id'] == alice
+    assert 'password_hash' not in str(result)
+    assert 'Private Alice work' in str(result)
+    assert 'Private Bob work' not in str(result)
+    assert response.headers['cache-control'] == 'no-store'

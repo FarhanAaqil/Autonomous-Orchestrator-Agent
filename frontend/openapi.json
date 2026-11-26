@@ -2325,6 +2325,30 @@
         ]
       }
     },
+    "/account/export": {
+      "get": {
+        "operationId": "export_account_account_export_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Export Account",
+        "tags": [
+          "Account"
+        ]
+      }
+    },
     "/account/users/{user_id}/plan": {
       "put": {
         "operationId": "change_plan_account_users__user_id__plan_put",
