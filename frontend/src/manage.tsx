@@ -65,8 +65,10 @@ function Accounts() {
 function AccountUsage({tick}: {tick: number}) {
   type Summary = {plan: string; paid_until: string | null; expired: boolean; execution_mode: string; limits: Record<string, number>; usage: {day_utc: string; runs: number; tokens: number; active_schedules: number; connected_accounts: number}};
   const account = useResource<Summary | null>('/account', null, tick);
+  const preference = useAction(account.reload);
   const data = account.data;
   return <section className="panel"><h2>Your plan & usage</h2><Banner error={account.error}/>{account.loading && !data && <p role="status">Loading your account usage...</p>}{data && <>
+    <Banner error={preference.error} notice={preference.notice}/><label>Execution mode<select value={data.execution_mode} disabled={preference.busy} onChange={e => {const mode = e.target.value; if (mode === 'live' && !confirm('Enable live actions? Each action still needs approval and your own provider connection. Existing pending proposals will be superseded.')) return; void preference.act('/account/execution-mode', 'PUT', {mode});}}><option value="simulation">Simulation</option><option value="live">Live actions</option></select></label><p className="small">Changing mode requires new proposals and fresh consent. Sending Gmail needs your own connection. Other publishing adapters remain unavailable.</p>
     <div className="section-title"><h3>{data.plan === 'pro' ? 'Pro' : 'Free'} plan</h3><Pill value={data.execution_mode}/></div>
     {data.expired && <p>Your paid period ended. Free plan limits now apply.</p>}
     {data.plan === 'pro' && data.paid_until && <p>Paid through {new Date(data.paid_until).toLocaleDateString()}.</p>}

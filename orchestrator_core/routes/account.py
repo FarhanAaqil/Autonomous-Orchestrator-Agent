@@ -86,3 +86,24 @@ def save_personal_token(provider: str, body: PersonalToken, db=Depends(get_db_co
     except ConnectionUnavailable as exc:
         raise HTTPException(400, str(exc)) from None
     return {'connected': True, 'provider': provider}
+
+
+class ExecutionPreference(BaseModel):
+    mode: str
+
+
+@router.put('/execution-mode')
+def execution_preference(body: ExecutionPreference, db=Depends(get_db_connection), owner=Depends(personal_owner)):
+    if body.mode not in ('simulation', 'live'):
+        raise HTTPException(400, 'Choose simulation or live')
+    from orchestrator_core.storage.transactions import transaction
+    from orchestrator_core.storage.db import log_audit
+    with transaction(db):
+        user = db.execute('SELECT email_verified_at FROM users WHERE id=? AND active=1', (owner,)).fetchone()
+        if not user or (body.mode == 'live' and not user['email_verified_at']):
+            raise HTTPException(403, 'Verify your email before enabling live actions')
+        db.execute('UPDATE users SET execution_mode=? WHERE id=?', (body.mode, owner))
+        # Pending consent is never repurposed after a preference change.
+        db.execute("UPDATE approvals SET status='superseded',version=version+1 WHERE user_id=? AND status IN ('pending','approved') AND execution_mode<>?", (owner, body.mode))
+        log_audit(db, owner, 'execution_preference_changed', 'user', owner, {'mode': body.mode})
+    return {'mode': body.mode}

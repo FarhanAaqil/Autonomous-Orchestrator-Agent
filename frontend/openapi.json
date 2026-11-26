@@ -603,6 +603,19 @@
         "title": "EmailRequest",
         "type": "object"
       },
+      "ExecutionPreference": {
+        "properties": {
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "ExecutionPreference",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -2263,6 +2276,50 @@
           }
         ],
         "summary": "Start Connection",
+        "tags": [
+          "Account"
+        ]
+      }
+    },
+    "/account/execution-mode": {
+      "put": {
+        "operationId": "execution_preference_account_execution_mode_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecutionPreference"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Execution Preference",
         "tags": [
           "Account"
         ]
