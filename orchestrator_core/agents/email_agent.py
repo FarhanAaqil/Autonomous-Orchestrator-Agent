@@ -88,6 +88,10 @@ def check_inbox(max_messages: int = 5) -> str:
     Check unread messages in the user's Gmail inbox via IMAP.
     Free action: read-only, safe without approval gate.
     """
+    from orchestrator_core.core.ownership import execution_owner
+    if execution_owner.get():
+        from orchestrator_core.core.personal_providers import gmail_inbox
+        return gmail_inbox(max_messages)
     email_addr = os.getenv("EMAIL_ADDRESS")
     email_pass = os.getenv("EMAIL_APP_PASSWORD")
 

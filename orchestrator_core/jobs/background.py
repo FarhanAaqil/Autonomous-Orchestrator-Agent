@@ -37,6 +37,9 @@ def run_background_job(job, db, worker_id='worker-1', **unused):
         return JobService.transition(job.id, 'awaiting_approval' if pending else 'succeeded', db,
                                      result_json=json.dumps(result), worker_id=worker_id)
     except Exception as exc:
+        from orchestrator_core.core.connections import ConnectionUnavailable
+        if isinstance(exc, ConnectionUnavailable):
+            return JobService.transition(job.id, 'awaiting_input', db, error=str(exc), worker_id=worker_id)
         from orchestrator_core.exceptions import JobClaimConflictError
         if isinstance(exc, JobClaimConflictError):
             raise

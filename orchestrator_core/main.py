@@ -276,6 +276,12 @@ from orchestrator_core.routes import system as system_module
 from orchestrator_core.routes import memory as memory_module
 from orchestrator_core.routes import schedules as schedules_module
 
+from orchestrator_core.core.connections import ConnectionUnavailable
+
+@app.exception_handler(ConnectionUnavailable)
+async def connection_unavailable(request, exc):
+    return JSONResponse(status_code=409, content={'detail': str(exc), 'action': 'connect_account'})
+
 from orchestrator_core.core.plans import PlanLimitExceeded
 
 @app.exception_handler(PlanLimitExceeded)

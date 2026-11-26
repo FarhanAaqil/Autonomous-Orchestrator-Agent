@@ -1,5 +1,6 @@
 """Personal account metadata, usage, and manually administered plan expiry."""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from orchestrator_core.core.ownership import request_owner
 from orchestrator_core.core.plans import account_plan, usage_summary, grant_plan
@@ -48,3 +49,24 @@ def change_plan(user_id: str, body: PlanGrant, db=Depends(get_db_connection), ow
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from None
     return account_plan(db, user_id)
+
+
+@router.post('/connections/{provider}/start')
+def start_connection(provider: str, request: Request, db=Depends(get_db_connection), owner=Depends(personal_owner)):
+    from orchestrator_core.core.oauth import begin
+    from orchestrator_core.core.connections import ConnectionUnavailable
+    try:
+        return {'url': begin(db, owner, provider, request.cookies.get('orchestrator_session'))}
+    except ConnectionUnavailable as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@router.get('/connections/{provider}/callback')
+def finish_connection(provider: str, request: Request, state: str = '', code: str = '', db=Depends(get_db_connection), owner=Depends(personal_owner)):
+    from orchestrator_core.core.oauth import complete
+    from orchestrator_core.core.connections import ConnectionUnavailable
+    try:
+        complete(db, owner, provider, request.cookies.get('orchestrator_session'), state, code)
+    except ConnectionUnavailable as exc:
+        raise HTTPException(400, str(exc)) from None
+    return RedirectResponse('/#connection=complete', status_code=303, headers={'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer'})

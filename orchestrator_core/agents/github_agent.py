@@ -68,6 +68,10 @@ def _call_llm(prompt: str) -> str:
 
 def _api_get(endpoint: str) -> Any:
     """Call GitHub REST API with authorization headers if present."""
+    from orchestrator_core.core.ownership import execution_owner
+    if execution_owner.get():
+        from orchestrator_core.core.personal_providers import github_read
+        return github_read(endpoint)
     token = os.getenv("GITHUB_TOKEN")
     headers = {"Accept": "application/vnd.github.v3+json"}
     if token:
@@ -89,7 +93,9 @@ def _api_get(endpoint: str) -> Any:
 
 def _get_user_repos() -> list[dict]:
     """Fetch user repositories."""
-    data = _api_get(f"/users/{GITHUB_USERNAME}/repos?per_page=10&sort=updated")
+    from orchestrator_core.core.ownership import execution_owner
+    endpoint = '/user/repos?per_page=10&sort=updated' if execution_owner.get() else f'/users/{GITHUB_USERNAME}/repos?per_page=10&sort=updated'
+    data = _api_get(endpoint)
     if isinstance(data, list):
         return data
     return []

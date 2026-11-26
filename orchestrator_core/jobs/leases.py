@@ -52,6 +52,9 @@ def fenced_runner(fn):
             except JobClaimConflictError:
                 return JobService.get_job(job.id, db)
             except Exception as exc:
+                from orchestrator_core.core.connections import ConnectionUnavailable
+                if isinstance(exc, ConnectionUnavailable):
+                    return JobService.transition(job.id, 'awaiting_input', db, error=str(exc), worker_id=worker)
                 from orchestrator_core.exceptions import JobError
                 if not isinstance(exc, JobError):
                     raise
