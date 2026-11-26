@@ -25,6 +25,10 @@ def login(body: Credentials, request: Request, response: Response, db=Depends(ge
         raise HTTPException(403, 'Cross-site login is not allowed')
     token = identity.login(db, body.username, body.password, request.client.host if request.client else 'unknown')
     if not token:
+        retry = identity.login_retry_after(db, body.username, request.client.host if request.client else 'unknown')
+        if retry:
+            minutes = (retry + 59) // 60
+            raise HTTPException(429, f'Too many sign-in attempts. Wait {minutes} minute(s) before trying again.', headers={'Retry-After': str(retry)})
         raise HTTPException(401, 'Unable to sign in; check credentials or retry later')
     old = request.cookies.get('orchestrator_session')
     if old:

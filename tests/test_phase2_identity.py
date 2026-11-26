@@ -81,3 +81,26 @@ def test_dispatch_does_not_emit_after_session_revocation(monkeypatch):
     events = asyncio.run(collect())
     assert events == ['event: session.expired\ndata: {}\n\n']
     assert not calls
+
+
+def test_successful_logins_do_not_accumulate_an_account_lockout(db):
+    identity.create_user(db, 'admin', 'strong-test-password-123')
+    for _ in range(6):
+        assert identity.login(db, 'admin', 'strong-test-password-123', 'local-fixture')
+    assert identity.login_retry_after(db, 'admin', 'local-fixture') == 0
+
+
+@pytest.mark.parametrize('username', ['known-user', 'unknown-user'])
+def test_login_api_reports_retry_time_without_account_enumeration(db, username):
+    from orchestrator_core.main import app
+    identity.create_user(db, 'known-user', 'strong-test-password-123')
+    app.dependency_overrides[get_db_connection] = lambda: db
+    try:
+        client = TestClient(app)
+        for _ in range(5):
+            response = client.post('/auth/login', json={'username': username, 'password': 'wrong'})
+        assert response.status_code == 429
+        assert 1 <= int(response.headers['retry-after']) <= 900
+        assert 'Wait' in response.json()['detail']
+    finally:
+        app.dependency_overrides.clear()

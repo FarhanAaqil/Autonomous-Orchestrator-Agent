@@ -91,8 +91,21 @@ def login(db, username, password, address):
         # from making this in-flight authentication usable.
         db.execute('INSERT INTO sessions (token_hash,user_id,user_version,expires_at,created_at) VALUES (?,?,?,?,?)',
                    (digest(token), row['id'], row['version'], expires, current.isoformat()))
+        db.execute('DELETE FROM login_limits WHERE key=?', (keys[0],))
         log_audit(db, row['id'], 'login_succeeded', 'user', row['id'])
     return token
+
+
+def login_retry_after(db, username, address):
+    """Return lockout duration without revealing whether an account exists."""
+    import math
+    current = now()
+    remaining = 0
+    for key, maximum in (('account:' + digest(username.strip().lower()), 5), ('address:' + digest(address), 30)):
+        row = db.execute('SELECT attempts,reset_at FROM login_limits WHERE key=?', (key,)).fetchone()
+        if row and row['attempts'] >= maximum:
+            remaining = max(remaining, math.ceil((datetime.fromisoformat(row['reset_at']) - current).total_seconds()))
+    return max(0, remaining)
 
 
 def principal(db, token):
