@@ -1,5 +1,5 @@
 """Server-owned plan policy; expiry is checked on each access."""
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from orchestrator_core.storage.db import log_audit
 
 PLANS = {
@@ -67,8 +67,41 @@ def require_job_capacity(db, user_id):
     if user_id is None:
         return
     day = datetime.now(timezone.utc).date().isoformat()
-    used = db.execute('SELECT COUNT(*) FROM jobs WHERE user_id=? AND substr(created_at,1,10)=?', (user_id, day)).fetchone()[0]
+    used = run_count(db, user_id, day)
     require_capacity(db, user_id, 'runs_per_day', used)
+    require_new_account_capacity(db, user_id)
+
+
+def run_count(db, user_id, period):
+    jobs = db.execute('SELECT COUNT(*) FROM jobs WHERE user_id=? AND substr(created_at,1,?)=?', (user_id, len(period), period)).fetchone()[0]
+    synchronous = db.execute("SELECT COUNT(*) FROM audit_log WHERE actor=? AND event='synchronous_run_started' AND substr(created_at,1,?)=?", (user_id, len(period), period)).fetchone()[0]
+    return jobs + synchronous
+
+
+def require_new_account_capacity(db, user_id):
+    at = datetime.now(timezone.utc)
+    row = db.execute('SELECT created_at FROM users WHERE id=? AND active=1', (user_id,)).fetchone()
+    if not row:
+        raise PlanLimitExceeded('Account unavailable')
+    created = datetime.fromisoformat(row['created_at'])
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    if at - created >= timedelta(hours=24):
+        return
+    since = (at - timedelta(hours=1)).isoformat()
+    used = db.execute('SELECT COUNT(*) FROM jobs WHERE user_id=? AND created_at>=?', (user_id, since)).fetchone()[0]
+    used += db.execute("SELECT COUNT(*) FROM audit_log WHERE actor=? AND event='synchronous_run_started' AND created_at>=?", (user_id, since)).fetchone()[0]
+    if used >= 10:
+        raise PlanLimitExceeded('New accounts allow 10 run attempts per hour during their first 24 hours; retry later')
+
+
+def reserve_synchronous_run(db, user_id, path):
+    if user_id is None:
+        return
+    from orchestrator_core.storage.transactions import transaction
+    with transaction(db):
+        require_job_capacity(db, user_id)
+        log_audit(db, user_id, 'synchronous_run_started', 'request', detail={'path': path})
 
 
 def can_claim(db, user_id):
@@ -95,9 +128,9 @@ def usage_summary(db, user_id):
     return {
         'day_utc': day,
         'month_utc': day[:7],
-        'monthly_runs': db.execute('SELECT COUNT(*) FROM jobs WHERE user_id=? AND substr(created_at,1,7)=?', (user_id, day[:7])).fetchone()[0],
+        'monthly_runs': run_count(db, user_id, day[:7]),
         'monthly_tokens': db.execute('SELECT COALESCE(SUM(COALESCE(tokens_in+tokens_out,reserved_tokens)),0) FROM provider_usage WHERE user_id=? AND substr(used_at,1,7)=?', (user_id, day[:7])).fetchone()[0],
-        'runs': db.execute('SELECT COUNT(*) FROM jobs WHERE user_id=? AND substr(created_at,1,10)=?', (user_id, day)).fetchone()[0],
+        'runs': run_count(db, user_id, day),
         'tokens': db.execute('SELECT COALESCE(SUM(COALESCE(tokens_in+tokens_out,reserved_tokens)),0) FROM provider_usage WHERE user_id=? AND substr(used_at,1,10)=?', (user_id, day)).fetchone()[0],
         'active_schedules': db.execute('SELECT COUNT(*) FROM schedules WHERE user_id=? AND is_active=1', (user_id,)).fetchone()[0],
         'connected_accounts': db.execute('SELECT COUNT(*) FROM connections WHERE user_id=?', (user_id,)).fetchone()[0],

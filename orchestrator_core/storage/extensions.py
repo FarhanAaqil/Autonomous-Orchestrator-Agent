@@ -100,3 +100,10 @@ def migrate_extensions(conn):
                 from orchestrator_core.storage.tenant_schema import install
                 install(conn)
             conn.execute('INSERT INTO application_migrations VALUES (17)')
+
+        if not conn.execute('SELECT 1 FROM application_migrations WHERE version=18').fetchone():
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_audit_account_runs ON audit_log(actor,event,created_at)')
+            if getattr(conn, 'dialect', None) == 'postgresql':
+                from orchestrator_core.storage.tenant_schema import install_usage_summary
+                install_usage_summary(conn)
+            conn.execute('INSERT INTO application_migrations VALUES (18)')

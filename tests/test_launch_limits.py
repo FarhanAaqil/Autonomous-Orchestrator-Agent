@@ -98,3 +98,54 @@ def test_export_contains_only_owned_records_and_no_credentials(db):
     assert 'Private Alice work' in str(result)
     assert 'Private Bob work' not in str(result)
     assert response.headers['cache-control'] == 'no-store'
+
+
+def test_synchronous_and_queued_work_share_daily_allowance(db, monkeypatch):
+    from orchestrator_core.core.plans import reserve_synchronous_run, usage_summary
+    monkeypatch.setitem(PLANS, 'free', {**PLANS['free'], 'runs_per_day': 2})
+    owner = create_user(db, 'alice', 'fixture-password-123')['id']
+    reserve_synchronous_run(db, owner, '/dispatch')
+    JobService.create_job('general_chat', 'Queued work', db, owner=owner)
+    with pytest.raises(PlanLimitExceeded):
+        reserve_synchronous_run(db, owner, '/dispatch/stream')
+    with pytest.raises(PlanLimitExceeded):
+        JobService.create_job('general_chat', 'Over quota', db, owner=owner)
+    usage = usage_summary(db, owner)
+    assert usage['runs'] == usage['monthly_runs'] == 2
+
+
+def test_new_accounts_are_throttled_even_on_paid_plans(db):
+    from orchestrator_core.core.plans import reserve_synchronous_run
+    from datetime import datetime, timezone, timedelta
+    owner = create_user(db, 'alice', 'fixture-password-123')['id']
+    with db:
+        db.execute("UPDATE users SET plan='pro',paid_until=? WHERE id=?", ((datetime.now(timezone.utc)+timedelta(days=30)).isoformat(), owner))
+    for _ in range(10):
+        reserve_synchronous_run(db, owner, '/route')
+    with pytest.raises(PlanLimitExceeded, match='first 24 hours'):
+        reserve_synchronous_run(db, owner, '/route')
+    with db:
+        db.execute('UPDATE users SET created_at=? WHERE id=?', ((datetime.now(timezone.utc)-timedelta(hours=25)).isoformat(), owner))
+    reserve_synchronous_run(db, owner, '/route')
+
+
+def test_route_admission_rejects_before_model_call(db, monkeypatch):
+    from fastapi.testclient import TestClient
+    from orchestrator_core.main import app
+    from orchestrator_core.storage.db import get_db_connection
+    from orchestrator_core.core.plans import reserve_synchronous_run
+    monkeypatch.setitem(PLANS, 'free', {**PLANS['free'], 'runs_per_day': 1})
+    owner = create_user(db, 'alice', 'fixture-password-123')['id']
+    reserve_synchronous_run(db, owner, '/dispatch')
+    def unexpected(*args, **kwargs):
+        raise AssertionError('Model must not run after quota is exhausted')
+    monkeypatch.setattr('orchestrator_core.routes.route.classify', unexpected)
+    app.dependency_overrides[get_db_connection] = lambda: db
+    try:
+        client = TestClient(app)
+        csrf = client.post('/auth/login', json={'username': 'alice', 'password': 'fixture-password-123'}).json()['csrf_token']
+        response = client.post('/route', json={'command': 'Hello'}, headers={'x-csrf-token': csrf})
+        assert response.status_code == 429
+        assert 'runs per day' in response.json()['detail']
+    finally:
+        app.dependency_overrides.clear()

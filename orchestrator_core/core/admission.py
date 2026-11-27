@@ -4,7 +4,7 @@ from threading import Lock
 from fastapi import Depends, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 from orchestrator_core.core.ownership import request_owner
-from orchestrator_core.core.plans import account_plan
+from orchestrator_core.core.plans import account_plan, reserve_synchronous_run, PlanLimitExceeded
 from orchestrator_core.storage.db import get_db_connection
 
 _lock = Lock()
@@ -43,4 +43,9 @@ async def admit_request(request: Request, owner=Depends(request_owner), db=Depen
         return
     limit = await run_in_threadpool(limits, db, owner)
     with slot(owner, limit):
+        if request.url.path.rstrip('/') in ('/dispatch', '/dispatch/stream', '/route'):
+            try:
+                await run_in_threadpool(reserve_synchronous_run, db, owner, request.url.path)
+            except PlanLimitExceeded as exc:
+                raise HTTPException(429, str(exc)) from None
         yield

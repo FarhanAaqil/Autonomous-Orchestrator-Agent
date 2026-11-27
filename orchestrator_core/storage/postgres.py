@@ -176,7 +176,7 @@ def verify_schema(conn):
     if not conn.execute("SELECT to_regclass('public.application_migrations')").fetchone()[0]:
         raise RuntimeError('Application migrations are missing; run the migration command')
     versions = {row[0] for row in conn.execute('SELECT version FROM application_migrations').fetchall()}
-    if versions != set(range(2, 18)):
+    if versions != set(range(2, 19)):
         raise RuntimeError('Application schema does not match this release; run the migration command')
 
 

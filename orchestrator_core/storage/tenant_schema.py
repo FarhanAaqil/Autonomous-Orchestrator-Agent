@@ -22,7 +22,11 @@ def install(db):
         LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,public SET row_security=off
         AS $$ SELECT COALESCE(SUM(COALESCE(cost_usd,reserved_cost)),0)::double precision
         FROM public.provider_usage WHERE substr(used_at,1,10)=day_value $$""")
-    db.execute("""CREATE FUNCTION public.account_usage_summary(target_owner text, day_value text) RETURNS json
+    install_usage_summary(db)
+
+
+def install_usage_summary(db):
+    db.execute("""CREATE OR REPLACE FUNCTION public.account_usage_summary(target_owner text, day_value text) RETURNS json
         LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,public SET row_security=off
         AS $$ BEGIN
           IF NOT EXISTS (SELECT 1 FROM public.users WHERE id=NULLIF(current_setting('app.user_id',true),'') AND active=1 AND (id=target_owner OR role='administrator')) THEN
@@ -30,8 +34,8 @@ def install(db):
           END IF;
           RETURN json_build_object(
             'day_utc',day_value,'month_utc',substr(day_value,1,7),
-            'runs',(SELECT COUNT(*) FROM public.jobs WHERE user_id=target_owner AND substr(created_at,1,10)=day_value),
-            'monthly_runs',(SELECT COUNT(*) FROM public.jobs WHERE user_id=target_owner AND substr(created_at,1,7)=substr(day_value,1,7)),
+            'runs',(SELECT COUNT(*) FROM public.jobs WHERE user_id=target_owner AND substr(created_at,1,10)=day_value)+(SELECT COUNT(*) FROM public.audit_log WHERE actor=target_owner AND event='synchronous_run_started' AND substr(created_at,1,10)=day_value),
+            'monthly_runs',(SELECT COUNT(*) FROM public.jobs WHERE user_id=target_owner AND substr(created_at,1,7)=substr(day_value,1,7))+(SELECT COUNT(*) FROM public.audit_log WHERE actor=target_owner AND event='synchronous_run_started' AND substr(created_at,1,7)=substr(day_value,1,7)),
             'tokens',(SELECT COALESCE(SUM(COALESCE(tokens_in+tokens_out,reserved_tokens)),0) FROM public.provider_usage WHERE user_id=target_owner AND substr(used_at,1,10)=day_value),
             'monthly_tokens',(SELECT COALESCE(SUM(COALESCE(tokens_in+tokens_out,reserved_tokens)),0) FROM public.provider_usage WHERE user_id=target_owner AND substr(used_at,1,7)=substr(day_value,1,7)),
             'active_schedules',(SELECT COUNT(*) FROM public.schedules WHERE user_id=target_owner AND is_active=1),
