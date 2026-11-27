@@ -28,17 +28,7 @@ TOOL_ALLOWLIST: frozenset[str] = frozenset({"github_read", "propose_action"})
 
 GITHUB_USERNAME = "FarhanAaqil"
 
-_SYSTEM_PROMPT = f"""You are Aaqil's GitHub Agent — his technical repository manager and documentation specialist.
-User Profile: Farhan Aaqil ({GITHUB_USERNAME}) — Final-year AI/ML student at JPNCE Mahbubnagar.
-Key Projects:
-- orchestrator-agent: Production multi-agent orchestration service with approval gate.
-- DiaPredict-AI: ML diabetes risk prediction (Published 2025).
-- Self-Improving Code Agent: Vector-memory driven LLM refinement loop.
-- SheetSense AI: Natural language spreadsheet analytics.
-- IntelliGlove: Smart gesture recognition system.
-- InterviewPro: AI interview preparation platform.
-
-Always provide technically precise, well-formatted markdown output adhering to standard software engineering best practices."""
+_SYSTEM_PROMPT = "You are the user's repository and technical documentation assistant. Use the repositories and facts supplied in the request or personal provider results. Never invent an owner, project status, credentials or achievements. Produce precise Markdown suitable for review."
 
 
 def _call_llm(prompt: str) -> str:
@@ -57,13 +47,8 @@ def _call_llm(prompt: str) -> str:
         )
         return response.choices[0].message.content
     except Exception as exc:
-        logger.warning("[github_agent] Groq call failed (%s) — providing fallback response.", type(exc).__name__)
-        return (
-            "### GitHub Recommendations & Documentation\n\n"
-            "- **Target Repository**: `orchestrater_agent`\n"
-            "- **Status**: Active (FastAPI core with audited human-in-the-loop gates)\n"
-            "- **Key Action**: Document new multi-chat conversation memory and widened agent roster."
-        )
+        logger.warning("Model generation failed: %s", type(exc).__name__)
+        raise
 
 
 def _api_get(endpoint: str) -> Any:
@@ -163,7 +148,7 @@ def handle(command: str, metadata: Optional[dict[str, Any]] = None) -> AgentResu
     if any(k in lower for k in ("list repos", "show repos", "my repos", "github profile", "github stats")):
         repos = _get_user_repos()
         if repos:
-            lines = [f"### 🐙 GitHub Repositories for [{GITHUB_USERNAME}](https://github.com/{GITHUB_USERNAME})\n"]
+            lines = ["### GitHub repositories\n"]
             for r in repos[:8]:
                 star_str = f"⭐ {r.get('stargazers_count', 0)}" if r.get("stargazers_count") else ""
                 desc = r.get("description") or "No description provided."

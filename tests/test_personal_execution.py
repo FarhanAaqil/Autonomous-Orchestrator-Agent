@@ -159,3 +159,19 @@ def test_publication_proposal_uses_explicit_destination_without_inventing_one(mo
     explicit = agent.handle('Publish on Hashnode publication id: 0123456789abcdef01234567')
     assert explicit.metadata['approval_payload']['publication_id'] == '0123456789abcdef01234567'
     assert 'Farhan' not in agent._SYSTEM_PROMPT
+
+
+@pytest.mark.parametrize('module', ['career_agent', 'email_agent', 'linkedin_agent', 'github_agent', 'research_agent', 'growth_content_agent'])
+def test_personal_agent_prompts_do_not_assume_project_author(module):
+    import importlib
+    agent = importlib.import_module('orchestrator_core.agents.' + module)
+    assert 'Farhan' not in agent._SYSTEM_PROMPT and 'Aaqil' not in agent._SYSTEM_PROMPT
+
+
+@pytest.mark.parametrize('module', ['career_agent', 'email_agent', 'linkedin_agent', 'github_agent', 'growth_content_agent'])
+def test_model_failure_does_not_generate_fabricated_personal_content(monkeypatch, module):
+    import importlib
+    agent = importlib.import_module('orchestrator_core.agents.' + module)
+    monkeypatch.setattr(agent, 'Groq', Mock(side_effect=RuntimeError('provider unavailable')))
+    with pytest.raises(RuntimeError):
+        agent._call_llm('Write about my experience')

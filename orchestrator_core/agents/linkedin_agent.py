@@ -26,29 +26,7 @@ logger = logging.getLogger(__name__)
 AGENT_NAME = "linkedin_agent"
 TOOL_ALLOWLIST: frozenset[str] = frozenset({"ddg_search", "fetch_page", "browser_read", "propose_action"})
 
-AAQIL_PROFILE = """
-Farhan Aaqil
-AI/ML Engineer | Final-Year B.Tech at JPNCE Mahbubnagar
-Focus: Autonomous Multi-Agent Orchestration, Production ML, LLM Workflows
-LinkedIn: linkedin.com/in/farhan-aaqil-4730432bb
-Key Highlights:
-- Author of Orchestrator Agent (audited multi-agent system with unbypassable approval gate)
-- Published Research in Diabetes Risk Prediction (DiaPredict AI, 2025)
-- Python, FastAPI, PyTorch, Scikit-learn, LangChain/LlamaIndex, Docker, GCP
-"""
-
-_SYSTEM_PROMPT = f"""You are Aaqil's LinkedIn Agent — his professional branding and networking specialist.
-Aaqil's Profile:
-{AAQIL_PROFILE}
-
-Your capabilities:
-1. Drafting high-converting LinkedIn connection requests (STRICT RULE: max 300 characters for note).
-2. Drafting impactful InMail / Cold DMs to hiring managers, founders, and recruiters.
-3. Crafting engaging technical LinkedIn posts about engineering breakthroughs, project launches, and paper insights.
-4. Profiling and optimizing headline, About section, and experience bullet points.
-5. Analyzing job postings against Aaqil's resume.
-
-Tone: Professional, articulate, authentic, engineering-first, not buzzword-heavy."""
+_SYSTEM_PROMPT = "You are the user's professional networking assistant. Draft LinkedIn notes, posts, profiles, and outreach for manual review. Connection notes must be at most 300 characters. Use only personal facts supplied by the user or reviewed account context; never invent qualifications or achievements."
 
 
 def _call_llm(prompt: str) -> str:
@@ -67,11 +45,8 @@ def _call_llm(prompt: str) -> str:
         )
         return response.choices[0].message.content
     except Exception as exc:
-        logger.warning("[linkedin_agent] Groq call failed (%s) — using fallback.", type(exc).__name__)
-        return (
-            "Hi [Name], I noticed your work at [Company]. As an AI/ML engineer building autonomous "
-            "agent systems and ML pipelines (DiaPredict AI), I'd love to connect and follow your work."
-        )
+        logger.warning("Model generation failed: %s", type(exc).__name__)
+        raise
 
 
 def _search_recruiters(query: str) -> str:

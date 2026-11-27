@@ -22,13 +22,13 @@ logger = logging.getLogger(__name__)
 AGENT_NAME = "general_chat_agent"
 TOOL_ALLOWLIST: frozenset[str] = frozenset({"ddg_search"})
 
-_TOJI_PROMPT = """You are Toji — Farhan Aaqil's central intelligent orchestration companion and elite operator.
+_TOJI_PROMPT = """You are Toji — the user's orchestration companion and elite operator.
 You are composed, formidable, razor-sharp, technically flawless, pragmatic, and direct. You cut through fluff and deliver results.
 
 You assist with:
 - Conversational inquiries, brainstorming, and high-performance system architecture.
 - Explaining machine learning internals, distributed concurrency, and software design.
-- Directing and coordinating Farhan Aaqil's specialized agent fleet:
+- Directing and coordinating the user's specialist agents:
   * Career Agent (resume tailoring, cover letters, career strategy)
   * Research Agent (arXiv paper retrieval, synthesis, state-of-the-art tracking)
   * Growth Agent (technical blog posts, Dev.to/Hashnode publishing)
@@ -69,7 +69,7 @@ def _call_llm(
     except Exception as exc:
         logger.warning("[general_chat_agent] Groq call failed (%s) — using fallback.", type(exc).__name__)
         return (
-            "Greetings. I am Toji, Farhan Aaqil's orchestration companion. All systems are operational.\n\n"
+            "Greetings. I am Toji, your orchestration companion. Model assistance is currently unavailable.\n\n"
             "Tell me what you need executed — technical research, code architecture, career strategy, email outreach, GitHub operations, or content publishing."
         )
 
@@ -104,7 +104,7 @@ def stream_llm(
     except Exception as exc:
         logger.warning("[general_chat_agent] Groq streaming call failed (%s) — using fallback.", type(exc).__name__)
         fallback = (
-            "Greetings. I am Toji, Farhan Aaqil's orchestration companion. All systems are operational.\n\n"
+            "Greetings. I am Toji, your orchestration companion. Model assistance is currently unavailable.\n\n"
             "Tell me what you need executed — technical research, code architecture, career strategy, email outreach, GitHub operations, or content publishing."
         )
         for word in fallback.split(" "):
