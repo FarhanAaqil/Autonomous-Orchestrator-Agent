@@ -55,7 +55,7 @@ The local runner disables dotenv loading and external sockets and uses disposabl
 
 In `frontend`, run `npm run lint`, `npm test`, and `npm run build`. Browser workflows use `python scripts/phase3_browser_server.py` on port 8081, then `npm --prefix frontend run test:browser`; this fixture has separate test accounts and simulation-only data.
 
-On 2026-11-26 the branch passed **395 isolated Python tests**, with **8 PostgreSQL/restore checks skipped** in that run. All **9 checks in the separate disposable PostgreSQL/restore suite** passed. The frontend builds and passes lint, its 6 unit tests, and the configured asset budgets. Three desktop endpoint checks also passed. These are local results; no production database upgrade was performed.
+On 2026-11-27 the complete isolated suite passed **413 tests with no skips**, with disposable PostgreSQL, RLS and encrypted restore enabled. The latest browser run passed **13 workflows**. The frontend builds and passes lint, its 6 unit tests, and the configured asset budgets. Three desktop endpoint checks also passed. These are local results; no production database upgrade was performed.
 
 The corrected frozen offline router evaluation measured **71/106 (67.0%)**, below the unchanged **90%** accuracy gate and several per-class F1 gates. Development-only intent improvements scored 102/103 on the development split but did not generalize sufficiently. The former label-derived 100% score was invalid. The release gate remains failing; do not bypass it or report the release complete. No live provider evaluation was performed.
 
@@ -67,7 +67,7 @@ Pricing reads the server-owned limits. An optional HTTPS payment link opens the 
 
 ## Remaining launch gates
 
-- PostgreSQL row-level security and NOT NULL owner constraints, with transaction context, worker/scheduler handling, backfill, and rollback rehearsal.
+- Final deployment and hostile multi-user review of PostgreSQL isolation. RLS and NOT NULL owner constraints are implemented, with transaction scope, worker polling, first-admin backfill, rollback and restricted-role/API tests. Production data has not been migrated.
 - Complete account deletion across SQL and vectors, including concurrent work and retryable failures. Export is implemented; deletion is not.
 - Personal GitHub/DEV/Hashnode publishing adapters with receipt/error tests; Gmail OAuth operator verification and configuration.
 - Daily admission limits covering synchronous work as well as queued jobs, and additional first-24-hour abuse limits. Request concurrency is currently bounded per account and globally in one API process; multiple API processes require coordinated admission.
