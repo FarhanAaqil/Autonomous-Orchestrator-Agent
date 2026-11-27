@@ -121,8 +121,10 @@ def test_sandbox_blocks_empty_or_invalid_url():
 
 # ── 2. Domain Constraints & Allowlist Bypasses ────────────────────────────────
 
-def test_sandbox_enforces_domain_allowlist():
+def test_sandbox_enforces_domain_allowlist(monkeypatch):
     """Assert navigation outside the allowlist raises SandboxSecurityError."""
+    # This tests hostname matching, independently of public DNS or local NAT64.
+    monkeypatch.setattr('socket.getaddrinfo', lambda *args, **kwargs: [(2, 1, 6, '', ('93.184.216.34', 443))])
     # When allowlist is set
     allowed = ("linkedin.com", "github.com")
 
