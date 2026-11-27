@@ -103,7 +103,12 @@ jobs:
           npx playwright install --with-deps chromium
 
       - name: Run complete isolated release regressions
-        run: python scripts/test_local.py tests
+        env:
+          PHASE2_RESTORE_DATABASE_URL: postgresql://postgres:disposable-phase2-test-password@127.0.0.1:5432/phase2_restore
+          PG_TOOLS_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          docker exec "$PG_TOOLS_CONTAINER" createdb -U postgres phase2_restore
+          python scripts/test_local.py tests
 
       - name: Verify API contracts and static boundaries
         run: |
