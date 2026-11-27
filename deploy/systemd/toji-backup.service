@@ -1,0 +1,19 @@
+[Unit]
+Description=Encrypted Toji database backup
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=toji-backup
+Group=toji-backup
+WorkingDirectory=/opt/toji
+EnvironmentFile=/etc/toji/backup.env
+ExecStart=/opt/toji/.venv/bin/python -m orchestrator_core.storage.scheduled_backup
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/toji-backups
+TimeoutStartSec=300

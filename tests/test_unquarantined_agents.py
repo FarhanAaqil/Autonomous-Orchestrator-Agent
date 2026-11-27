@@ -94,14 +94,15 @@ def test_linkedin_agent_connection_note_free_read():
         assert "Connection Note" in result.output
 
 
-def test_linkedin_agent_post_gated_write():
-    """Publishing/sharing to LinkedIn must return action_type='linkedin_post'."""
+def test_linkedin_agent_post_is_a_manual_draft():
+    """LinkedIn publishing intent must never queue an external action."""
     with patch("orchestrator_core.agents.linkedin_agent._call_llm", return_value="Excited to announce our multi-agent framework!"):
         result = linkedin_agent.handle("post on linkedin about our multi-agent framework")
         assert result.agent == "linkedin_agent"
-        assert result.action_type == "linkedin_post"
-        assert "Requires Approval" in result.output
-        assert "approval_payload" in result.metadata
+        assert result.action_type is None
+        assert "Draft only" in result.output
+        assert result.metadata["draft_only"] is True
+        assert "approval_payload" not in result.metadata
 
 
 # ── general_chat_agent tests ──────────────────────────────────────────────────

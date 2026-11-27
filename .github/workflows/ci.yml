@@ -28,6 +28,7 @@ jobs:
       EXECUTOR_HMAC_SECRET: ci-only-signing-secret-with-32-characters
       GROQ_API_KEY: ""
       PHASE2_TEST_DATABASE_URL: postgresql://postgres:disposable-phase2-test-password@127.0.0.1:5432/phase2_test
+      PHASE2_RLS_DATABASE_URL: postgresql://postgres:disposable-phase2-test-password@127.0.0.1:5432/phase2_test
 
     steps:
       - name: Checkout repository
@@ -83,10 +84,6 @@ jobs:
       - name: Run focused Phase 2 regressions
         run: python scripts/test_local.py tests/test_phase2_*.py
 
-      - name: Router Eval CI Gate (Frozen Test Split)
-        run: |
-          python eval/run_eval.py --dry-run --split test --ci-gate --no-save
-
       - name: Set up Node 24
         uses: actions/setup-node@v4
         with:
@@ -105,6 +102,14 @@ jobs:
           npm run build
           npx playwright install --with-deps chromium
 
+      - name: Run complete isolated release regressions
+        env:
+          PHASE2_RESTORE_DATABASE_URL: postgresql://postgres:disposable-phase2-test-password@127.0.0.1:5432/phase2_restore
+          PG_TOOLS_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          docker exec "$PG_TOOLS_CONTAINER" createdb -U postgres phase2_restore
+          python scripts/test_local.py tests
+
       - name: Verify API contracts and static boundaries
         run: |
           python scripts/export_frontend_contract.py --check
@@ -119,3 +124,6 @@ jobs:
           trap 'kill "$browser_pid" 2>/dev/null || true' EXIT
           python -c "import time,urllib.request; exec('for attempt in range(30):\n try:\n  urllib.request.urlopen(\"http://127.0.0.1:8081/health\",timeout=1); break\n except OSError: time.sleep(1)\nelse: raise SystemExit(\"Browser fixture did not start\")')"
           npm --prefix frontend run test:browser
+
+      - name: Router Eval CI Gate (Frozen Test Split)
+        run: python eval/run_eval.py --dry-run --split test --ci-gate --no-save

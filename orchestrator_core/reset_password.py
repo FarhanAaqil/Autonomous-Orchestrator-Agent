@@ -18,6 +18,7 @@ def reset_password(db, username, password):
         db.execute('UPDATE users SET password_hash=?,version=version+1 WHERE id=?',
                    (encoded, user['id']))
         db.execute('DELETE FROM sessions WHERE user_id=?', (user['id'],))
+        db.execute("DELETE FROM account_tokens WHERE user_id=? AND purpose='reset'", (user['id'],))
         db.execute('DELETE FROM login_limits WHERE key=?', ('account:' + digest(username),))
         log_audit(db, 'local-recovery', 'password_reset', 'user', user['id'])
         db.commit()

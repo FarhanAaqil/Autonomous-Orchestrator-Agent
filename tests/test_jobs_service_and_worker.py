@@ -143,14 +143,14 @@ def test_heartbeat_updates(mem_db: sqlite3.Connection):
     assert claimed is not None
 
     # Valid heartbeat
-    assert JobService.heartbeat(job.id, "worker-1", mem_db) is True
+    assert JobService.heartbeat(job.id, "worker-1", mem_db, generation=claimed.lease_generation) is True
 
     # Invalid worker
-    assert JobService.heartbeat(job.id, "worker-2", mem_db) is False
+    assert JobService.heartbeat(job.id, "worker-2", mem_db, generation=claimed.lease_generation) is False
 
     # After cancellation, heartbeat returns False
     JobService.cancel_job(job.id, mem_db)
-    assert JobService.heartbeat(job.id, "worker-1", mem_db) is False
+    assert JobService.heartbeat(job.id, "worker-1", mem_db, generation=claimed.lease_generation) is False
 
 
 # ── Zombie Reaper Tests ────────────────────────────────────────────────────────
@@ -164,7 +164,7 @@ def test_reaper_requeues_with_backoff(mem_db: sqlite3.Connection):
     # Artificially set heartbeat to 120 seconds ago
     old_time = (datetime.now(timezone.utc) - timedelta(seconds=120)).isoformat()
     with mem_db:
-        mem_db.execute("UPDATE jobs SET heartbeat_at = ? WHERE id = ?", (old_time, job.id))
+        mem_db.execute("UPDATE jobs SET lease_expires_at = ? WHERE id = ?", (old_time, job.id))
 
     reaped = reap_zombies(mem_db, timeout_seconds=60.0)
     assert job.id in reaped
@@ -191,7 +191,7 @@ def test_reaper_fails_exhausted_attempts(mem_db: sqlite3.Connection):
 
     updated = JobService.get_job(job.id, mem_db)
     assert updated.status == "failed"
-    assert "attempts exhausted" in (updated.error or "")
+    assert "lease expired" in (updated.error or "").lower()
 
 
 # ── Untrusted Data Sanitizer Tests ─────────────────────────────────────────────
@@ -286,8 +286,8 @@ def test_check_guards_budget_exceeded(mem_db: sqlite3.Connection):
         mem_db.execute("UPDATE system_flags SET value = '10.00' WHERE key = 'daily_budget_usd'")
         # Simulate high cost incurred today
         mem_db.execute(
-            "UPDATE jobs SET cost_usd = 15.00, created_at = ? WHERE id = ?",
-            (f"{today}T00:00:00", job.id),
+            "INSERT INTO provider_usage (id,job_id,used_at,reserved_tokens,reserved_cost,state) VALUES ('budget-test',?, ?,0,15.00,'reserved')",
+            (job.id, f"{today}T00:00:00"),
         )
 
     with pytest.raises(BudgetExceededError) as exc_info:

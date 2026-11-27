@@ -41,34 +41,72 @@ class Connection:
         self.release = release
         self.closed = False
         self._contexts = []
+        self._transaction_owner = None
 
     @property
     def in_transaction(self):
         return self.raw.info.transaction_status != TransactionStatus.IDLE
 
+    def _bind_owner(self):
+        from orchestrator_core.core.ownership import execution_owner
+        owner = execution_owner.get() or ''
+        if self._transaction_owner is not None and self._transaction_owner != owner:
+            raise RuntimeError('Cannot change account inside a database transaction')
+        if self._transaction_owner is None:
+            self.raw.execute("SELECT set_config('app.user_id', %s, true)", (owner,))
+            self._transaction_owner = owner
+
     def execute(self, sql, params=()):
-        if sql.strip().rstrip(';').upper() == 'BEGIN IMMEDIATE':
+        statement = sql.strip().rstrip(';').upper()
+        if statement in ('BEGIN IMMEDIATE', 'BEGIN'):
             self.raw.execute('BEGIN')
-            return self.raw.execute('SELECT pg_advisory_xact_lock(74201901)')
+            self._transaction_owner = None
+            self._bind_owner()
+            if statement == 'BEGIN IMMEDIATE':
+                return self.raw.execute('SELECT pg_advisory_xact_lock(74201901)')
+            return self.raw.execute('SELECT 1')
+        if not self.in_transaction:
+            self._transaction_owner = None
+            with self.raw.transaction():
+                self._bind_owner()
+                result = self.raw.execute(parameters(sql) if params else sql, params or None)
+            self._transaction_owner = None
+            return result
+        self._bind_owner()
         return self.raw.execute(parameters(sql) if params else sql, params or None)
 
     def executemany(self, sql, params):
-        return self.raw.cursor().executemany(parameters(sql), params)
+        with self:
+            return self.raw.cursor().executemany(parameters(sql), params)
 
     def commit(self):
         self.raw.commit()
+        self._transaction_owner = None
 
     def rollback(self):
         self.raw.rollback()
+        self._transaction_owner = None
 
     def __enter__(self):
+        if not self.in_transaction:
+            self._transaction_owner = None
         tx = self.raw.transaction()
         tx.__enter__()
+        try:
+            self._bind_owner()
+        except BaseException:
+            import sys
+            tx.__exit__(*sys.exc_info())
+            raise
         self._contexts.append(tx)
         return self
 
     def __exit__(self, *exc):
-        return self._contexts.pop().__exit__(*exc)
+        try:
+            return self._contexts.pop().__exit__(*exc)
+        finally:
+            if not self.in_transaction:
+                self._transaction_owner = None
 
     def close(self):
         if not self.closed:
@@ -138,7 +176,7 @@ def verify_schema(conn):
     if not conn.execute("SELECT to_regclass('public.application_migrations')").fetchone()[0]:
         raise RuntimeError('Application migrations are missing; run the migration command')
     versions = {row[0] for row in conn.execute('SELECT version FROM application_migrations').fetchall()}
-    if versions != set(range(2, 11)):
+    if versions != set(range(2, 19)):
         raise RuntimeError('Application schema does not match this release; run the migration command')
 
 
@@ -146,3 +184,12 @@ def verify_runtime_role(conn):
     row = conn.execute("SELECT rolsuper,rolcreaterole,rolcreatedb,rolbypassrls FROM pg_roles WHERE rolname=current_user").fetchone()
     if any(row[index] for index in range(4)) or conn.execute("SELECT has_schema_privilege(current_user,'public','CREATE')").fetchone()[0]:
         raise RuntimeError('The application database role must not have administration or schema creation privileges')
+    verify_tenant_boundaries(conn)
+
+
+def verify_tenant_boundaries(conn):
+    from orchestrator_core.storage.tenant_schema import TENANT_TABLES
+    for table in TENANT_TABLES:
+        row = conn.execute("SELECT c.relrowsecurity,pg_has_role(current_user,c.relowner,'MEMBER'),a.attnotnull FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_attribute a ON a.attrelid=c.oid AND a.attname='user_id' WHERE n.nspname='public' AND c.relname=?", (table,)).fetchone()
+        if not row or not row[0] or row[1] or not row[2]:
+            raise RuntimeError('Runtime database must enforce account ownership for ' + table)

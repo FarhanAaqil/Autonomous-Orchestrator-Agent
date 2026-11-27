@@ -58,6 +58,7 @@ def restore(archive, destination_url, key):
             db.execute('UPDATE memory_items SET vector_synced_at=NULL')
             # Restored browser sessions must not resurrect previously revoked access.
             db.execute('DELETE FROM sessions')
+            db.execute('DELETE FROM account_tokens')
     finally:
         db.close()
     return {'restore_seconds': time.monotonic()-started, 'vectors': 'rebuild pending', 'sessions': 'revoked'}

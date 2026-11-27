@@ -149,8 +149,9 @@ def test_crash_resumption_from_checkpoints(clean_db: sqlite3.Connection):
     # Worker 1 executes step 0 (llm) and step 1 (tool)
     # Then we simulate crash by exiting runner (raising StopIteration or simply stopping)
     try:
+        turns = iter([False, True])
         def crashing_llm(msgs):
-            if len(msgs) > 2:  # After first turn
+            if next(turns):  # Crash on the second provider call
                 raise RuntimeError("Simulated worker process crash / OOM!")
             return worker_1_turn
 

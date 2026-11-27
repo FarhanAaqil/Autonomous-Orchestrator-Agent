@@ -1,0 +1,11 @@
+[Unit]
+Description=Nightly encrypted Toji backup
+
+[Timer]
+OnCalendar=*-*-* 02:15:00 UTC
+RandomizedDelaySec=300
+Persistent=true
+Unit=toji-backup.service
+
+[Install]
+WantedBy=timers.target

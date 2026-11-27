@@ -36,7 +36,7 @@ def verify_bearer_token(
         raise HTTPException(401, 'Authentication required', headers={'WWW-Authenticate': 'Bearer'})
     mutation = request.method not in ('GET', 'HEAD', 'OPTIONS')
     admin_path = request.url.path.startswith(('/system/', '/auth/users', '/agents/'))
-    if mutation and request.url.path not in ('/auth/logout', '/auth/password') and (user['role'] == 'viewer' or (admin_path and user['role'] != 'administrator')):
+    if mutation and request.url.path not in ('/auth/logout', '/auth/password', '/account/delete') and (user['role'] == 'viewer' or (admin_path and user['role'] != 'administrator')):
         raise HTTPException(403, 'This operation requires a higher role')
     request.state.principal = user
     return user['id']

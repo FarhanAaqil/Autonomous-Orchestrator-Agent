@@ -107,6 +107,11 @@ def test_chroma_backup_and_restore_roundtrip(tmp_path: Path):
 
 def test_full_system_snapshot_creates_manifest(test_db_path: Path, tmp_path: Path, monkeypatch):
     monkeypatch.setenv("DATABASE_PATH", str(test_db_path))
+    from orchestrator_core.config import get_settings
+    chroma = tmp_path / "vectors"
+    chroma.mkdir()
+    monkeypatch.setenv("CHROMA_DB_DIR", str(chroma))
+    get_settings.cache_clear()
     snapshot_dir = tmp_path / "full_snapshot"
 
     res = create_full_system_snapshot(output_dir=snapshot_dir)
@@ -117,8 +122,8 @@ def test_full_system_snapshot_creates_manifest(test_db_path: Path, tmp_path: Pat
 
     manifest = json.loads(manifest_file.read_text())
     assert manifest["version"] == "1.0.0"
-    assert manifest["rpo"] == "1h"
-    assert manifest["rto"] == "<30s"
+    assert manifest["backup_seconds"] >= 0
+    assert "rpo" not in manifest and "rto" not in manifest
     assert "sqlite" in manifest
     assert "chroma" in manifest
     assert len(manifest["sqlite"]["sha256"]) == 64

@@ -11,6 +11,7 @@ worker crashes, runs the reaper, and asserts:
 """
 
 import concurrent.futures
+import json
 import random
 import sqlite3
 import threading
@@ -20,6 +21,7 @@ from typing import List
 import pytest
 
 from orchestrator_core.jobs.reaper import reap_zombies
+from orchestrator_core.jobs.leases import current_lease
 from orchestrator_core.jobs.service import JobService
 from orchestrator_core.storage.db import get_db, run_migrations
 
@@ -67,32 +69,33 @@ def test_soak_100_jobs_concurrent_workers_and_crash_recovery(soak_db: str):
                 if not job:
                     break
 
+                current_lease.set((job.id, worker_id, job.lease_generation))
                 with counter_lock:
                     execution_counter[job.id] = execution_counter.get(job.id, 0) + 1
 
                 # Record step 1
                 JobService.record_step(
                     job.id,
-                    idx=1,
+                    idx=job.attempts * 2,
                     kind="llm",
                     name="reasoning",
-                    input_data={"prompt": job.goal},
-                    output_data={"thought": "planning execution"},
+                    input_json=json.dumps({"prompt": job.goal}),
+                    output_json=json.dumps({"thought": "planning execution"}),
                     db=w_conn,
                 )
 
                 # Simulate random crash for ~15% of executions (exit without updating status)
-                if random.random() < 0.15:
+                if int(job.id.replace("-", "")[:8], 16) % 7 == 0 and job.attempts == 1:
                     continue  # Leaves job in 'running' with heartbeat expiring
 
                 # Record step 2 and finish job
                 JobService.record_step(
                     job.id,
-                    idx=2,
+                    idx=job.attempts * 2 + 1,
                     kind="tool",
                     name="finish",
-                    input_data={"status": "done"},
-                    output_data={"result": "success"},
+                    input_json=json.dumps({"status": "done"}),
+                    output_json=json.dumps({"result": "success"}),
                     db=w_conn,
                 )
                 JobService.transition(job.id, "succeeded", w_conn, result_json='{"completed": true}')
@@ -102,27 +105,31 @@ def test_soak_100_jobs_concurrent_workers_and_crash_recovery(soak_db: str):
     # 2. Run first wave with 5 concurrent workers
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         futures = [executor.submit(worker_loop, f"worker-{w}", 40) for w in range(5)]
-        concurrent.futures.wait(futures)
+        for future in futures:
+            future.result()
 
     # 3. Reap zombies (simulating expired heartbeat for crashed workers)
     r_conn = get_db(soak_db)
     # Set heartbeat back to simulate expiration for remaining running jobs
     r_conn.execute(
-        "UPDATE jobs SET heartbeat_at = '2020-01-01T00:00:00' WHERE status = 'running';"
+        "UPDATE jobs SET lease_expires_at = '2020-01-01T00:00:00' WHERE status = 'running';"
     )
     r_conn.commit()
     reap_zombies(r_conn, timeout_seconds=1)
+    r_conn.execute("UPDATE jobs SET not_before=NULL WHERE status='queued'")
+    r_conn.commit()
     r_conn.close()
 
     # 4. Run second wave of workers to drain requeued and remaining jobs
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         futures = [executor.submit(worker_loop, f"reaper-worker-{w}", 40) for w in range(5)]
-        concurrent.futures.wait(futures)
+        for future in futures:
+            future.result()
 
     # 5. Final reap if any jobs still lingering in running
     r_conn = get_db(soak_db)
     r_conn.execute(
-        "UPDATE jobs SET heartbeat_at = '2020-01-01T00:00:00' WHERE status = 'running';"
+        "UPDATE jobs SET lease_expires_at = '2020-01-01T00:00:00' WHERE status = 'running';"
     )
     r_conn.commit()
     reap_zombies(r_conn, timeout_seconds=1)
@@ -136,6 +143,7 @@ def test_soak_100_jobs_concurrent_workers_and_crash_recovery(soak_db: str):
         job = JobService.claim_job("cleaner-worker", r_conn)
         if not job:
             break
+        current_lease.set((job.id, "cleaner-worker", job.lease_generation))
         JobService.transition(job.id, "succeeded", r_conn, result_json='{"drain": true}')
 
     # 6. Verify database state & invariants
@@ -164,3 +172,5 @@ def test_soak_100_jobs_concurrent_workers_and_crash_recovery(soak_db: str):
     assert cur.fetchone()[0] == "ok"
 
     r_conn.close()
+
+    current_lease.set(None)

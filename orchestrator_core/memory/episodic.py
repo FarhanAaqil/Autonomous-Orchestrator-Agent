@@ -14,11 +14,10 @@ import sqlite3
 from typing import Any, Callable, Optional
 import uuid
 
-from groq import Groq
+from orchestrator_core.core.provider import Groq
 
 from orchestrator_core.config import get_settings
 from orchestrator_core.models import MemoryItemRecord
-from orchestrator_core.storage.chroma_client import get_agent_collection
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +49,7 @@ def _default_llm_summarize(transcript: str) -> str:
         )
         return resp.choices[0].message.content or "Episode summarized."
     except Exception as exc:
-        logger.warning("[episodic] Groq summarization call failed: %s — using rule-based summary.", exc)
+        logger.warning("[episodic] Groq summarization call failed: %s — using rule-based summary.", type(exc).__name__)
         lines = [line.strip() for line in transcript.split("\n") if line.strip()]
         first_few = " | ".join(lines[:3]) if lines else "Empty session"
         return f"Session Synopsis: {first_few[:200]}"
@@ -61,6 +60,7 @@ def summarize_session(
     db: sqlite3.Connection,
     llm_callable: Optional[Callable[[str], str]] = None,
     chroma_client: Optional[Any] = None,
+    owner: Optional[str] = None,
 ) -> Optional[MemoryItemRecord]:
     """
     Summarize a completed or idle conversation session into an episodic memory item.
@@ -71,10 +71,10 @@ def summarize_session(
         """
         SELECT role, content, agent, created_at
         FROM messages
-        WHERE conversation_id = ?
+        WHERE conversation_id = ? AND COALESCE(user_id,'')=?
         ORDER BY created_at ASC
         """,
-        (session_id,),
+        (session_id, owner or ""),
     ).fetchall()
 
     if not rows:
@@ -102,8 +102,8 @@ def summarize_session(
             """
             INSERT INTO memory_items (
                 id, kind, key, value, source_session_id, source_message_id,
-                pending_review, created_at, updated_at, deleted
-            ) VALUES (?, 'episode_summary', ?, ?, ?, NULL, 0, ?, ?, 0)
+                pending_review, created_at, updated_at, deleted, user_id
+            ) VALUES (?, 'episode_summary', ?, ?, ?, NULL, 0, ?, ?, 0, ?)
             """,
             (
                 item_id,
@@ -112,24 +112,17 @@ def summarize_session(
                 session_id,
                 now_iso,
                 now_iso,
+                owner,
             ),
         )
 
     # 4. Sync to ChromaDB
     try:
-        coll = get_agent_collection("episodes", client=chroma_client)
-        coll.upsert(
-            ids=[item_id],
-            documents=[summary_text.strip()],
-            metadatas=[{
-                "id": item_id,
-                "kind": "episode_summary",
-                "source_session_id": session_id,
-            }],
-        )
+        from orchestrator_core.memory.vector_write import synchronize_item
+        synchronize_item(db, item_id, owner, client=chroma_client, name='episodes')
         logger.info("[episodic] Episode summary vector stored in ChromaDB (id=%s).", item_id)
     except Exception as exc:
-        logger.warning("[episodic] ChromaDB sync failed for episode %s: %s", item_id, exc)
+        logger.warning("[episodic] ChromaDB sync failed for episode %s: %s", item_id, type(exc).__name__)
 
     logger.info("[episodic] Session %s summarized into episode %s.", session_id, item_id)
     # Fetch and return created record

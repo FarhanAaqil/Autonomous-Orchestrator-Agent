@@ -29,21 +29,7 @@ logger = logging.getLogger(__name__)
 AGENT_NAME = "email_agent"
 TOOL_ALLOWLIST: frozenset[str] = frozenset({"email_read", "propose_action"})
 
-AAQIL_SIGNATURE = """--
-Farhan Aaqil
-B.Tech AI/ML | JPNCE Mahbubnagar
-GitHub: github.com/FarhanAaqil
-LinkedIn: linkedin.com/in/farhan-aaqil-4730432bb
-Phone: +91-6300825009"""
-
-_SYSTEM_PROMPT = f"""You are Aaqil's Email Agent — precision email communicator.
-You help check inbox activity, summarize correspondence, and draft professional emails
-for recruiter outreach, job applications, follow-ups, paper submissions, and general queries.
-
-Tone: Professional, genuine, clear, and concise. Never generic.
-Aaqil's Signature:
-{AAQIL_SIGNATURE}
-"""
+_SYSTEM_PROMPT = "You are the user's email assistant. Summarize correspondence and draft clear professional messages. Use only sender details supplied by the user or reviewed account context. Omit a signature if none is supplied; never invent an identity or contact details."
 
 
 def _call_llm(prompt: str) -> str:
@@ -62,13 +48,8 @@ def _call_llm(prompt: str) -> str:
         )
         return response.choices[0].message.content
     except Exception as exc:
-        logger.warning("[email_agent] Groq call failed (%s) — providing template fallback.", exc)
-        return (
-            f"Subject: Inquiring Regarding Opportunities\n\n"
-            f"Dear Recipient,\n\n"
-            f"I hope this message finds you well. I am reaching out regarding technical opportunities in AI/ML engineering.\n\n"
-            f"Best regards,\n{AAQIL_SIGNATURE}"
-        )
+        logger.warning("Model generation failed: %s", type(exc).__name__)
+        raise
 
 
 def _decode_mime_words(s: str) -> str:
@@ -88,6 +69,10 @@ def check_inbox(max_messages: int = 5) -> str:
     Check unread messages in the user's Gmail inbox via IMAP.
     Free action: read-only, safe without approval gate.
     """
+    from orchestrator_core.core.ownership import execution_owner
+    if execution_owner.get():
+        from orchestrator_core.core.personal_providers import gmail_inbox
+        return gmail_inbox(max_messages)
     email_addr = os.getenv("EMAIL_ADDRESS")
     email_pass = os.getenv("EMAIL_APP_PASSWORD")
 
@@ -127,7 +112,7 @@ def check_inbox(max_messages: int = 5) -> str:
         mail.logout()
         return f"📬 **Recent Unread Messages ({len(summaries)} found):**\n\n" + "\n".join(summaries)
     except Exception as exc:
-        logger.warning("[email_agent] IMAP read failed: %s", exc)
+        logger.warning("[email_agent] IMAP read failed: %s", type(exc).__name__)
         return f"⚠️ Could not check live inbox: {exc}. Verify EMAIL_ADDRESS and EMAIL_APP_PASSWORD in .env."
 
 
@@ -138,7 +123,7 @@ def handle(command: str, metadata: Optional[dict[str, Any]] = None) -> AgentResu
       - Reads: inbox check, summarization, draft generation (free)
       - Writes: send requests return action_type="send_email" (gated)
     """
-    logger.info("[email_agent] Processing command: %.80s", command)
+    logger.info("[email_agent] Processing request")
     lower = command.lower().strip()
     meta = dict(metadata or {})
 
@@ -168,12 +153,12 @@ User Request: {command}
 Ensure the output includes:
 1. A clear Subject line (prefixed with 'Subject: ')
 2. The professional body
-3. Aaqil's signature
+3. A signature only if the user supplied one
 """
     draft_output = _call_llm(draft_prompt)
 
     # Parse subject line from generated output
-    subject = "Message from Farhan Aaqil"
+    subject = "Message"
     for line in draft_output.split("\n"):
         if line.lower().startswith("subject:"):
             subject = line.split(":", 1)[1].strip()

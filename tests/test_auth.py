@@ -53,7 +53,7 @@ def test_protected_route_rejects_missing_auth_when_token_set():
         client = TestClient(app)
         res = client.get("/approvals")
         assert res.status_code == 401
-        assert "Authorization header" in res.json()["detail"]
+        assert "Authentication required" in res.json()["detail"]
     finally:
         app.dependency_overrides.pop(get_settings, None)
 
@@ -67,7 +67,7 @@ def test_protected_route_rejects_invalid_token():
         headers = {"Authorization": "Bearer invalid-token-value"}
         res = client.get("/approvals", headers=headers)
         assert res.status_code == 401
-        assert "Invalid authentication token" in res.json()["detail"]
+        assert "Authentication required" in res.json()["detail"]
     finally:
         app.dependency_overrides.pop(get_settings, None)
 

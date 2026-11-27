@@ -1,378 +1,89 @@
-<p align="center">
-  <img src="docs/logo.png" width="96" height="96" alt="Orchestrator Agent Logo" style="border-radius: 20px;" />
-</p>
+<p align="center"><img src="docs/logo.png" width="96" height="96" alt="Orchestrator Agent logo" /></p>
 
-# Autonomous Orchestrator Agent v1.0.0
+# Autonomous Orchestrator Agent
 
-[![CI](https://github.com/FarhanAaqil/Autonomous-Orchestrator-Agent/actions/workflows/ci.yml/badge.svg)]
-(https://github.com/FarhanAaqil/Autonomous-Orchestrator-Agent/actions/workflows/ci.yml)
-![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
-![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)
-![React 18](https://img.shields.io/badge/frontend-React%2018%20SPA-61dafb.svg)
-![License](https://img.shields.io/badge/license-MIT-green.svg)
-![Coverage](https://img.shields.io/badge/tests-239%20passed-brightgreen.svg)
-![Router Accuracy](https://img.shields.io/badge/router%20eval-100.0%25-success.svg)
+A local agent workspace built with FastAPI, PostgreSQL, ChromaDB, and a compiled React 19 interface. It supports conversations, durable jobs, recurring schedules, reviewed memories, pipelines, and explicit approval of proposed external actions. The interface uses warm surfaces, reduced-motion support, and an optional 3D agent view.
 
-An enterprise-grade, audited autonomous multi-agent orchestration service built on **FastAPI**, **SQLite (WAL)**, **ChromaDB**, and **React 18**. 
+[Watch the narrated introduction](docs/media/toji-intro.mp4).
 
-Orchestrator Agent coordinates natural language instructions across a specialized 9-agent roster with a mathematically validated routing harness, an unbypassable human-in-the-loop approval gate, a crash-resilient autonomy engine, isolated sandboxed web browsing, and multi-tier episodic memory.
+**Public launch is not ready.** Phase 4 and the multi-user launch work are in progress. Keep public registration disabled and external actions in simulation while the remaining gates are completed. Passing tests are evidence for their covered behaviors, not a guarantee of security.
 
----
+## Current behavior
 
-## Visual Interface Overview
+- Cookie sessions, CSRF checks, administrator/operator/viewer roles, and local administrator recovery.
+- Opt-in email verification and password recovery using hashed, expiring, single-use tokens. SMTP must be configured privately; development logs do not print token-bearing links.
+- Owner-filtered conversations, jobs, events, approvals, schedules, memory, pipeline runs, and evaluation history. Background jobs retain ownership. PostgreSQL row-level security and final owner constraints are still pending.
+- Approval hashes and signatures bind the reviewed content, mode, expiry, and account. Outcomes distinguish simulation, submission, confirmation, failure, and uncertainty.
+- Atomic daily job/token limits, schedule and connection limits, per-account job concurrency, and expiring free/pro plan policy. Personal usage is available in Settings. Administrator plan grants are manual; no automatic payment integration is claimed.
+- Encrypted owner-bound provider credential storage and key rotation. OAuth onboarding and personal-provider execution integration are not yet complete.
 
-<p align="center">
-  <img src="docs/screenshots/dashboard_preview.png" alt="Orchestrator Agent Executive Control Plane" width="100%" style="border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.12);" />
-</p>
+PostgreSQL is the intended runtime database. SQLite remains available for development and isolated tests. API, worker, scheduler, browser sandbox, and database run as separate services. Release version comes from `orchestrator_core/version.py`.
 
-*Executive Control Plane: Real-time conversational streaming, autonomous multi-agent dispatch, voice synthesis controls, and responsive workspace.*
+## Local setup
 
-<br/>
+For a new installation with Python, Node, and Docker available:
 
-<p align="center">
-  <img src="docs/screenshots/jobs_timeline.png" alt="Autonomous Jobs Timeline & Step Telemetry" width="100%" style="border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.12);" />
-</p>
-
-*Autonomous Jobs Timeline: Turn-by-turn thought traces, tool observations, token consumption telemetry, and queue backlog management.*
-
-### Integrated Control Plane Modules
-
-| Module | Purpose | Core Features |
-| :--- | :--- | :--- |
-| **Conversational Dispatch** | Real-time SSE streaming console | Multi-turn chat, markdown rendering, voice input/output controls |
-| **Jobs Timeline & Telemetry** | Autonomous loop inspection | Compare-And-Set worker transitions, step latency, tool traces, token caps |
-| **Approval Gate (SEC-01..08)** | Cryptographic authorization | HMAC-SHA256 signatures, zero-parameter execution, tamper detection |
-| **Cron Schedules** | Recurring agent automation | Preset cadences (15m, Hourly, Daily), custom cron expressions, manual execution |
-| **Episodic Memory** | Multi-tier semantic persistence | Vector search, human confirmation review queue, session summarization |
-| **Multi-Agent Pipelines** | Multi-stage workflows | Chained agents (e.g. Research → Publishing), stage progress indicators |
-| **Router Benchmark** | Empirical evaluation suite | 209-sample intent benchmark, accuracy/precision/recall matrix |
-| **Budget & Safety Controls** | Autonomous guardrails | Hard budget caps ($5.00 default), step ceilings, global emergency kill-switch |
-| **Diagnostics & Telemetry** | System health monitoring | API circuit breakers (30s timeout), connection pool stats, failure counters |
-
----
-
-## Architectural Guarantees & System Topology
-
-```mermaid
-flowchart TD
-    Client["Client / Web UI / API"] --> Auth["Bearer Token Auth Barrier"]
-    Auth --> Router["LLM Router (Groq) & Circuit Breaker"]
-
-    subgraph "Routing & Governance"
-        Router -->|"Confidence >= 0.60"| Dispatch["Agent Dispatch"]
-        Router -->|"Confidence < 0.60"| Clarify["Clarification Required (422)"]
-    end
-
-    subgraph "Autonomy Engine"
-        Dispatch --> JobQueue["Persistent Job Queue (SQLite WAL)"]
-        JobQueue -->|"Atomic CAS Claim"| Worker["Worker Loop (ReAct)"]
-        Worker -->|"Check Guards"| Caps["Kill Switch & Budget Ceiling"]
-        Worker -->|"Step Trace"| Steps["job_steps Table"]
-        Worker -->|"Heartbeat"| Reaper["Zombie Job Reaper"]
-    end
-
-    subgraph "Capability-Governed Tools"
-        Worker --> ToolReg["ToolRegistry"]
-        ToolReg -->|"READ"| ReadTools["Search, arXiv, Page Fetch, Browser"]
-        ToolReg -->|"PROPOSE"| ProposeTools["propose_action()"]
-        ToolReg -.->|"EXEC (FORBIDDEN)"| Blocked["Direct Execution Blocked"]
-    end
-
-    subgraph "Hardened Approval Gate (SEC-01..08)"
-        ProposeTools --> ApprovalRow["approvals Table (payload_hash)"]
-        HumanReview["Human Reviewer"] -->|"approve(expected_hash)"| Signed["HMAC-SHA256 Signed Record"]
-        Signed -->|"execute_approved(id)"| ExecLock["CAS Atomic Claim Lock"]
-        ExecLock --> Executor["Isolated SDK Executor (_dispatch_action)"]
-        ExecLock --> AuditLog["Append-Only audit_log Table"]
-    end
-
-    subgraph "Sandbox & Memory"
-        ReadTools --> Sandbox["Playwright Docker Sandbox (SSRF Guard)"]
-        Worker <--> MemoryEngine["Memory (Semantic Facts + ChromaDB Vectors)"]
-    end
+```powershell
+python scripts/setup_local_postgres.py
+cd frontend
+npm ci --ignore-scripts --no-audit --no-fund
+npm run build
+cd ..
+docker compose up -d --build
+docker exec -it toji_orchestrator_core python -m orchestrator_core.bootstrap --username admin
 ```
 
----
+Choose a private password of 14 or more characters. Password input is invisible. Open http://localhost:8080 and sign in with `admin` and that password. No default administrator password is shipped.
 
-## 1. Unbypassable Approval Gate (SEC-01 through SEC-08)
+To recover an existing account locally:
 
-The approval gate eliminates the fundamental security holes common in agent systems:
-
-| Policy | Requirement | Implementation & Security Guarantee |
-| :--- | :--- | :--- |
-| **SEC-01** | **Zero-Parameter Contract** | `execute_approved(approval_id, db)` accepts **only** the approval ID. Callers cannot pass or substitute payloads at execution time; payloads are loaded strictly from canonical database storage. |
-| **SEC-02** | **Payload Binding** | `compute_payload_hash()` binds action type, target, and canonical canonicalized JSON into a SHA-256 hash stored in `payload_hash`. Any tampering invalidates the hash. |
-| **SEC-03** | **HMAC-SHA256 Signing** | Server-side `EXECUTOR_HMAC_SECRET` signs approval records upon decision (`approval_signature`). Execution verifies this cryptographic signature prior to executing mutations. |
-| **SEC-04** | **CAS Concurrency & Idempotency** | Atomic compare-and-set claim: `UPDATE approvals SET status = 'executing' WHERE id = ? AND status = 'approved'`. Unique `idempotency_key` rejects replays with `IdempotencyConflictError`. |
-| **SEC-05** | **State Machine Invariants** | Non-executable states (`pending`, `rejected`, `expired`, `superseded`) fail immediately with `ApprovalNotGrantedError`. |
-| **SEC-06** | **Edit-and-Supersede** | Editing a proposal transitions the old proposal to `superseded` and creates a new pending proposal, preventing silent in-place modifications. |
-| **SEC-07** | **Immutable Audit Trail** | Every decision and execution step is recorded in `audit_log` (`approval_requested`, `approval_granted`, `execution_attempted`, `execution_succeeded`, `tampering_detected`). |
-| **SEC-08** | **Target Recipient Policy** | `evaluate_target_policy()` blocks denylisted recipient targets and flags unverified destinations for mandatory human verification. |
-| **TOCTOU** | **Hash Match Verification** | `POST /approvals/{id}/approve` accepts `expected_hash`; rejects with HTTP 409 Conflict if payload changed before decision. |
-
----
-
-## 2. Router Benchmark & Accuracy Harness
-
-Intent classification is continuously validated against a 209-sample ground-truth dataset ([`eval/fixed_set.json`](eval/fixed_set.json)) split into 103 dev and 106 test cases:
-
-- **Frozen Test Accuracy**: **100.0%** (106/106 commands classified correctly)
-- **CI Quality Gate**: Automatically enforced in GitHub Actions (`accuracy >= 90%`, `F1 >= 0.80`).
-- **Prompt Staleness Check**: Validates prompt SHA-256 hashes against deployed versions to prevent silent prompt drift.
-
-### Empirical Confusion Matrix (Frozen Test Split)
-
-```
-                       career  research  growth  critic  info  email  github  linkedin  general
--------------------------------------------------------------------------------------------------
-  career                   10         0       0       0     0      0       0         0        0
-  research                  0        12       0       0     0      0       0         0        0
-  growth_content            0         0      12       0     0      0       0         0        0
-  critic                    0         0       0      11     0      0       0         0        0
-  info                      0         0       0       0    10      0       0         0        0
-  email                     0         0       0       0     0      9       0         0        0
-  github                    0         0       0       0     0      0      12         0        0
-  linkedin                  0         0       0       0     0      0       0        10        0
-  general_chat              0         0       0       0     0      0       0         0       30
+```powershell
+docker exec -it toji_orchestrator_core python -m orchestrator_core.reset_password --username admin
 ```
 
-### Per-Agent Benchmark Metrics
+Recovery revokes existing sessions. Do not put passwords in command-line arguments or chat. Back up existing data before upgrading or running new migrations; the local setup instructions are not a migration approval for an existing installation.
 
-| Agent | Precision | Recall | F1-Score | Capability Scope |
-|---|---|---|---|---|
-| `career_agent` | 1.00 | 1.00 | 1.00 | Resume tailoring, skill-gap analysis, interview prep, cover letters |
-| `research_agent` | 1.00 | 1.00 | 1.00 | ArXiv literature search, paper drafting, academic journal ranking |
-| `growth_content_agent` | 1.00 | 1.00 | 1.00 | Technical blog drafting, Twitter threads, content calendars |
-| `critic_agent` | 1.00 | 1.00 | 1.00 | Objective critique and rubric scoring for resumes and drafts |
-| `info_agent` | 1.00 | 1.00 | 1.00 | Portfolio queries, system documentation, architecture queries |
-| `email_agent` | 1.00 | 1.00 | 1.00 | Inbox triage, draft proposal generation (`propose_action`) |
-| `github_agent` | 1.00 | 1.00 | 1.00 | Repository inspection, issue/PR proposals (`propose_action`) |
-| `linkedin_agent` | 1.00 | 1.00 | 1.00 | Public profile lookup, post drafting (`propose_action`) |
-| `general_chat_agent` | 1.00 | 1.00 | 1.00 | Interactive conversation with multi-session memory retrieval |
+## Verification
 
----
-
-## 3. Production Agent Roster & Capability Model
-
-Agents operate under a strict capability model:
-- `Capability.READ`: Idempotent GET-only tools with zero mutating HTTP verbs.
-- `Capability.PROPOSE`: Writes strictly to `approvals` table for human review.
-- `Capability.EXEC`: External side-effect tools (prohibited in agent registries; executor-only).
-
-| Agent | Allowed Read Tools | Allowed Propose Actions | EXEC Tools |
-|---|---|---|:---:|
-| **Career Agent** | `google_search`, `fetch_page`, `github_read` | — | **0 (None)** |
-| **Research Agent** | `google_search`, `arxiv_search`, `fetch_page`, `browser_read` | — | **0 (None)** |
-| **Growth/Content Agent** | Research outputs as context | `publish_post` | **0 (None)** |
-| **Critic Agent** | Artifacts and text inputs only | — | **0 (None)** |
-| **Info Agent** | Knowledge base and system docs | — | **0 (None)** |
-| **Email Agent** | `email_read` (IMAP read-only) | `send_email` | **0 (None)** |
-| **GitHub Agent** | `github_read` (REST read-only) | `github_comment`, `github_issue_create` | **0 (None)** |
-| **LinkedIn Agent** | `ddg_search`, `browser_read` | `linkedin_post_text` | **0 (None)** |
-| **General Chat Agent** | `memory_retrieval` (Episodic + Semantic) | — | **0 (None)** |
-
----
-
-## 4. Playwright Browser Sandbox & Injection Defense
-
-Web browsing operations utilize an isolated sandbox:
-1. **Container Isolation**: Non-root `pwuser` (uid 1001), read-only root filesystem, ephemeral contexts discarding cookies/storage upon close.
-2. **SSRF Guard**: Strict scheme filtering (`http`/`https` only, blocking `file://`, `data:`, `javascript:`), resolving destinations to block loopback (`127.0.0.1`), RFC 1918 private subnets, and Cloud Metadata IPs (`169.254.169.254`).
-3. **Prompt Injection Tag Defense**: Unstructured web content is wrapped in `<untrusted_data source="...">` tags. Any adversarial attempts to inject `</untrusted_data>` are escaped to `&lt;/untrusted_data&gt;`.
-
----
-
-## 5. Configuration & Environment Variables
-
-All settings are managed via [`orchestrator_core/config.py`](orchestrator_core/config.py) using `pydantic-settings` and cached with `lru_cache`:
-
-| Parameter | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `DATABASE_PATH` | `string` | `database/orchestrator.db` | File path to primary SQLite database (WAL mode). |
-| `CHROMA_DB_DIR` | `string` | `chroma_db` | Persistent storage directory for ChromaDB vector embeddings. |
-| `GROQ_API_KEY` | `string` | `None` | Groq Cloud API credentials for fast LLM inference. |
-| `ROUTER_MODEL` | `string` | `openai/gpt-oss-120b` | Model identifier used for command classification. |
-| `ROUTER_CONFIDENCE_THRESHOLD` | `float` | `0.60` | Confidence gate threshold. Inputs below threshold return 422 clarification. |
-| `AUTH_TOKEN` | `string` | `None` | Optional Bearer token. When set, all non-health routes require Authorization header. |
-| `EXECUTOR_HMAC_SECRET` | `string` | *(generated dev key)* | Secret key for signing approvals and verifying execution authorization. |
-| `ENVIRONMENT` | `string` | `development` | Deployment environment (`development`, `staging`, `production`). |
-| `APP_VERSION` | `string` | `1.0.0` | Application version reported in health and telemetry endpoints. |
-
----
-
-## 6. Comprehensive API Reference & Actual Parameters
-
-### A. Health & System Diagnostics
-- **`GET /health`**
-  - Response: `{"status": "ok", "version": "1.0.0", "environment": "development"}`
-- **`GET /system/circuit`**
-  - Response: `{"state": "CLOSED", "failure_count": 0, "threshold": 3, "cooldown_seconds": 30}`
-- **`POST /system/circuit/reset`**
-  - Resets router circuit breaker to `CLOSED`.
-- **`GET /system/flags`**
-  - Response: `{"kill_switch": "off", "daily_budget_usd": "5.00", ...}`
-- **`POST /system/kill-switch`**
-  - Body: `{"on": true}`
-  - Response: `{"status": "ok", "kill_switch": "on"}`
-
-### B. Command Routing & Direct Dispatch
-- **`POST /route`**
-  - Body:
-    ```json
-    {
-      "command": "Analyze my resume for senior software engineer roles",
-      "context": []
-    }
-    ```
-  - Response (200 OK):
-    ```json
-    {
-      "agent": "career_agent",
-      "task": "Analyze my resume for senior software engineer roles",
-      "confidence": 0.95,
-      "reasoning": "Keyword match and intent aligns with career coaching",
-      "suggested_tools": ["fetch_page", "github_read"]
-    }
-    ```
-  - Low confidence response (422 Unprocessable Entity):
-    ```json
-    {
-      "detail": {
-        "status": "needs_clarification",
-        "question": "Did you want me to search arXiv papers or critique your research abstract?",
-        "options": ["research_agent", "critic_agent"]
-      }
-    }
-    ```
-- **`POST /dispatch`**
-  - Body: `{"command": "...", "force_agent": null}`
-  - Executes task immediately and returns agent output.
-
-### C. Autonomous Job Queue
-- **`GET /jobs`**
-  - Query parameters: `status` (string), `agent` (string), `session_id` (string), `limit` (int, default 20), `offset` (int, default 0).
-- **`POST /jobs`**
-  - Body:
-    ```json
-    {
-      "agent": "research_agent",
-      "goal": "Synthesize recent papers on diffusion model distillation",
-      "params": {},
-      "priority": 5,
-      "max_steps": 25,
-      "token_budget": 60000,
-      "not_before": null
-    }
-    ```
-- **`GET /jobs/{id}`**: Returns full `JobRecord`.
-- **`GET /jobs/{id}/steps`**: Returns chronologically ordered step traces.
-- **`POST /jobs/{id}/cancel`**: Transitions job to `cancelled`.
-- **`GET /jobs/events`**: Real-time SSE stream. Supports `Last-Event-ID` header and `?last_event_id=` query parameter.
-
-### D. Approval Gate
-- **`GET /approvals`**
-  - Query parameters: `status` (default `pending`), `limit` (50), `offset` (0).
-- **`POST /approvals`**
-  - Body:
-    ```json
-    {
-      "action_type": "send_email",
-      "payload": {"to": "contact@example.com", "subject": "Briefing", "body": "..."},
-      "target": "contact@example.com",
-      "idempotency_key": "unique-uuid-1234"
-    }
-    ```
-- **`POST /approvals/{id}/approve`**
-  - Body: `{"expected_hash": "sha256-hex-digest"}`
-  - Computes HMAC signature and transitions to `approved`.
-- **`POST /approvals/{id}/reject`**
-  - Body: `{"reason": "Declined by reviewer"}`
-- **`POST /approvals/{id}/edit`**
-  - Body: `{"action_type": "...", "payload": {...}, "target": "..."}`
-  - Supersedes old approval and creates a new pending proposal.
-- **`POST /approvals/{id}/execute`**
-  - Body: `{}` (zero payload parameters). Executes stored record.
-
-### E. Schedules & Recurring Jobs
-- **`GET /schedules`**: Lists all registered schedules.
-- **`POST /schedules`**
-  - Body:
-    ```json
-    {
-      "name": "Daily Executive Briefing",
-      "agent": "general_chat_agent",
-      "cron_expr": "0 9 * * *",
-      "task": "Compile daily briefing across news, GitHub, and email.",
-      "enabled": true
-    }
-    ```
-- **`PATCH /schedules/{id}`**: Updates `enabled`, `cron_expr`, or `task`.
-- **`DELETE /schedules/{id}`**: Deletes schedule.
-- **`POST /schedules/{id}/run-now`** (or `/run`): Triggers immediate job creation.
-
-### F. Memory & Context
-- **`GET /memory`**: Query parameters `kind` (`fact`, `preference`, `episode_summary`), `pending_review` (bool), `query` (string).
-- **`POST /memory`**: Body `{"kind": "fact", "key": "timezone", "value": "UTC+5:30"}`.
-- **`PATCH /memory/{id}`**: Body `{"pending_review": false, "value": "..."}`.
-- **`DELETE /memory/{id}`**: Deletes SQLite item and vector from ChromaDB.
-
----
-
-## 7. Disaster Recovery & Operations Runbook
-
-### Quickstart CLI Commands
-```bash
-# 1. Install dependencies
-pip install -r requirements.txt
-
-# 2. Run test suite (239 tests)
-pytest -m "not real_llm" -v
-
-# 3. Run static AST safety linter
-ruff check orchestrator_core/ tests/
-pytest tests/test_no_sdk_leakage.py -v
-
-# 4. Run frozen router eval gate (100% accuracy)
-python eval/run_eval.py --dry-run --split test --ci-gate --no-save
-
-# 5. Run 100-job concurrency soak test
-pytest tests/test_soak.py -v
-
-# 6. Start API server & Control Plane UI
-python -m uvicorn orchestrator_core.main:app --host 127.0.0.1 --port 8000
+```powershell
+python scripts/test_local.py tests
+python scripts/export_frontend_contract.py --check
+python scripts/check_frontend_budget.py
 ```
 
-### Disaster Recovery CLI (`scripts/backup_restore.py`)
-```bash
-# Create complete atomic snapshot (SQLite + ChromaDB + SHA-256 Manifest)
-python scripts/backup_restore.py snapshot --dest backups/snapshot_latest
+The local runner disables dotenv loading and external sockets and uses disposable state. PostgreSQL and restore tests require explicitly configured disposable databases. Never point those tests at your working database.
 
-# Restore SQLite database
-python scripts/backup_restore.py restore-db --backup backups/snapshot_latest/aaqil.db --target aaqil.db
+In `frontend`, run `npm run lint`, `npm test`, and `npm run build`. Browser workflows use `python scripts/phase3_browser_server.py` on port 8081, then `npm --prefix frontend run test:browser`; this fixture has separate test accounts and simulation-only data.
 
-# Restore ChromaDB vectors
-python scripts/backup_restore.py restore-chroma --archive backups/snapshot_latest/chroma.tar.gz --target chroma_db
+On 2026-11-27 the complete isolated suite passed **440 tests with no skips**, with disposable PostgreSQL, RLS and encrypted restore enabled. The latest browser run passed **13 workflows**. The frontend builds and passes lint, its 6 unit tests, and the configured asset budgets. Three desktop endpoint checks also passed. These are local results; no production database upgrade was performed.
 
-# Verify backup integrity
-python scripts/backup_restore.py verify --file backups/snapshot_latest/aaqil.db
-```
+The corrected frozen offline router evaluation measured **71/106 (67.0%)**, below the unchanged **90%** accuracy gate and several per-class F1 gates. Development-only intent improvements scored 102/103 on the development split but did not generalize sufficiently. The former label-derived 100% score was invalid. The release gate remains failing; do not bypass it or report the release complete. No live provider evaluation was performed.
 
----
+## Personal accounts in this branch
 
-## 8. Documentation Sitemap
+Settings supports separate GitHub and Gmail OAuth grants, validated DEV/Hashnode/Groq personal tokens, encrypted owner-bound storage, disconnect, personal execution mode, daily/monthly token usage, and JSON account export. Gmail is restricted to the configured beta allowlist; sending uses the account's own grant and still requires signed approval. LinkedIn is manual drafts only. GitHub issues/comments, DEV articles and Hashnode posts use personal connections and the same signed approval gate. Hashnode live proposals require an explicit publication ID (include `publication id: <ID>` in the brief). Provider acceptance is reported as submitted; timeouts remain uncertain and are never automatically retried.
 
-- **[Operations Runbook](docs/runbook.md)**: Production deployment, emergency controls, and worker scaling.
-- **[Disaster Recovery & Backup Runbook](docs/backup_restore_runbook.md)**: Recovery Point Objective (RPO) and Recovery Time Objective (RTO) verification.
-- **[Security Audit & Threat Checklist](docs/security_audit.md)**: Section 10 threat model verification report.
-- **[Architecture Decision Records (ADRs)](docs/adr/)**:
-  - [ADR 0001: FastAPI Composition Root & Hardened Approval Gate](docs/adr/0001-fastapi-core-and-approval-gate.md)
-  - [ADR 0002: Persistent Autonomous Job Queue & Atomic CAS Claim](docs/adr/0002-job-state-machine-and-cas-claim.md)
-  - [ADR 0003: Tool Capability Model & SSRF Boundary Isolation](docs/adr/0003-tool-capability-model-and-ssrf-isolation.md)
-  - [ADR 0004: Sandboxed Browser Execution & Prompt Injection Defense](docs/adr/0004-sandbox-browser-playwright-security.md)
-- **[Release Changelog](CHANGELOG.md)**: Version history for all 10 phases.
+Pricing reads the server-owned limits. An optional HTTPS payment link opens the operator's configured payment page; administrators grant Pro access with an explicit expiry after verifying payment. Automatic payment webhooks are deferred. Policy pages are prominently marked **DRAFT: needs human review**. Starter templates fill an editable brief without submitting it.
 
----
+## Remaining launch gates
+
+- Final deployment and hostile multi-user review of PostgreSQL isolation. RLS and NOT NULL owner constraints are implemented, with transaction scope, worker polling, first-admin backfill, rollback and restricted-role/API tests. Production data has not been migrated.
+- Account export and password-confirmed deletion are implemented. Deletion removes active SQL records and vectors, revokes sessions, preserves the last administrator, and waits for running work to finish. Vector writes recheck current ownership inside the deletion lock; failed cleanup leaves the account available for retry.
+- Operator verification/configuration for Gmail OAuth and publishing connections. Consent, payload, receipt, rejection and timeout behavior are covered by mocked tests; no live publishing was performed.
+- Daily run allowances now count admitted synchronous requests and queued jobs together, including failed attempts. Accounts in their first 24 hours are limited to 10 attempts per rolling hour, including Pro accounts. Request concurrency is bounded per account and globally in one API process; multiple API processes require coordinated admission. A dispatch that also queues background work consumes one attempt for each work unit.
+- Passing genuine router quality gates, production activation of nightly backups, external uptime/error alerting, final deployment/load/recovery checks, and independent security review.
+- Real domain/hosting, SMTP, OAuth applications, connection encryption keys, payment details, and human review of legal drafts.
+
+The Compose `public` profile provides a Caddy proxy; it does not establish launch readiness. Public registration defaults to disabled. Keep the installation private until these gates pass. Existing running containers are not automatically upgraded by source commits.
+
+## Operations
+
+See [the runtime notes](docs/phase2-runtime.md), [approval security notes](docs/phase1-security.md), and the repository's local `implementation.md` for tracked work. Older runbooks and screenshots may describe earlier releases; verify commands against the current code.
+
+Nightly backup templates and retention/monitoring instructions are in [backup operations](docs/backup-operations.md). They are opt-in and have not been activated on production. PostgreSQL backup tooling is in `orchestrator_core.storage.postgres_backup`. It encrypts archives, requires an empty restore destination, revokes restored sessions, and marks vectors for rebuilding. Store encryption keys separately from archives. Account deletion does not rewrite existing encrypted backup archives. Operators must document and enforce their archive retention period and reapply deletions before making a restored database available to users. No recovery-time or recovery-point objective is claimed without a measured deployment drill.
 
 ## License
 
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+See [LICENSE](LICENSE).
+
+Publishing contracts were checked against the official [GitHub issues API](https://docs.github.com/en/rest/issues/issues), [Forem API](https://developers.forem.com/api/v1), and [Hashnode mutation reference](https://github.com/Hashnode/gql-skill/blob/main/skills/gql-api/references/mutations.md). Hashnode currently requires a Pro target publication for API publishing.

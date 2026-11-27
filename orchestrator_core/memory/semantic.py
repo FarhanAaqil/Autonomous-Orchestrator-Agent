@@ -21,29 +21,16 @@ from typing import Any, Optional
 import uuid
 
 from orchestrator_core.models import MemoryItemKind, MemoryItemRecord
-from orchestrator_core.storage.chroma_client import get_agent_collection
 
 logger = logging.getLogger(__name__)
 
 
-def _sync_to_chroma(
-    item_id: str,
-    text: str,
-    metadata: dict[str, Any],
-    client: Optional[Any] = None,
-) -> None:
-    """Best-effort upsert of memory item into ChromaDB."""
+def _sync_to_chroma(item_id, text, metadata, client=None, db=None):
     try:
-        coll = get_agent_collection("memory", client=client)
-        # Filter None values from metadata for ChromaDB compatibility
-        safe_meta = {k: ("" if v is None else str(v) if isinstance(v, (bool, int, float)) else str(v)) for k, v in metadata.items()}
-        coll.upsert(
-            ids=[item_id],
-            documents=[text],
-            metadatas=[safe_meta],
-        )
+        from orchestrator_core.memory.vector_write import synchronize_item
+        synchronize_item(db, item_id, metadata.get('user_id') or None, client=client)
     except Exception as exc:
-        logger.warning("[memory] ChromaDB sync failed for item %s: %s", item_id, exc)
+        logger.warning('Memory vector sync failed: %s', type(exc).__name__)
 
 
 def _row_to_record(row: sqlite3.Row) -> MemoryItemRecord:
@@ -73,6 +60,7 @@ def remember(
     pending_review: bool = True,
     db: Optional[sqlite3.Connection] = None,
     chroma_client: Optional[Any] = None,
+    owner: Optional[str] = None,
 ) -> MemoryItemRecord:
     """
     Store a semantic fact or preference into memory_items and index into vector store.
@@ -85,6 +73,13 @@ def remember(
     if kind not in valid_kinds:
         raise ValueError(f"Invalid memory kind '{kind}'. Must be one of {valid_kinds}")
 
+    for table, source_id in (("conversations", source_session_id), ("messages", source_message_id)):
+        if source_id and not db.execute(
+            f"SELECT id FROM {table} WHERE id=? AND COALESCE(user_id,'')=?",
+            (source_id, owner or ''),
+        ).fetchone():
+            raise ValueError("Memory source not found")
+
     item_id = str(uuid.uuid4())
     now_iso = datetime.now(timezone.utc).isoformat()
     clean_val = value.strip()
@@ -95,8 +90,8 @@ def remember(
             """
             INSERT INTO memory_items (
                 id, kind, key, value, source_session_id, source_message_id,
-                pending_review, created_at, updated_at, deleted
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                pending_review, created_at, updated_at, deleted, user_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
             """,
             (
                 item_id,
@@ -108,27 +103,29 @@ def remember(
                 1 if pending_review else 0,
                 now_iso,
                 now_iso,
+                owner,
             ),
         )
 
     # Sync to vector collection
     doc_text = f"Key: {clean_key}\n{clean_val}" if clean_key else clean_val
     meta = {
+        "user_id": owner or "",
         "id": item_id,
         "kind": kind,
         "key": clean_key or "",
         "pending_review": "1" if pending_review else "0",
         "source_session_id": source_session_id or "",
     }
-    _sync_to_chroma(item_id, doc_text, meta, client=chroma_client)
+    _sync_to_chroma(item_id, doc_text, meta, client=chroma_client, db=db)
 
     logger.info("[memory] Remembered %s (id=%s, pending=%s)", kind, item_id, pending_review)
-    return get_memory_item(item_id, db)  # type: ignore[return-value]
+    return get_memory_item(item_id, db, owner=owner)  # type: ignore[return-value]
 
 
-def get_memory_item(item_id: str, db: sqlite3.Connection) -> Optional[MemoryItemRecord]:
+def get_memory_item(item_id: str, db: sqlite3.Connection, owner: Optional[str] = None) -> Optional[MemoryItemRecord]:
     """Retrieve a single memory item by ID."""
-    row = db.execute("SELECT * FROM memory_items WHERE id = ?", (item_id,)).fetchone()
+    row = db.execute("SELECT * FROM memory_items WHERE id = ? AND COALESCE(user_id,'')=?", (item_id, owner or '')).fetchone()
     if not row:
         return None
     return _row_to_record(row)
@@ -141,13 +138,14 @@ def list_memory_items(
     db: Optional[sqlite3.Connection] = None,
     limit: int = 100,
     offset: int = 0,
+    owner: Optional[str] = None,
 ) -> list[MemoryItemRecord]:
     """List memory items matching filter criteria."""
     if db is None:
         raise ValueError("A database connection is required.")
 
-    query = "SELECT * FROM memory_items WHERE 1=1"
-    params: list[Any] = []
+    query = "SELECT * FROM memory_items WHERE COALESCE(user_id,'')=?"
+    params: list[Any] = [owner or ""]
 
     if not include_deleted:
         query += " AND deleted = 0"
@@ -167,15 +165,16 @@ def list_memory_items(
     return [_row_to_record(r) for r in rows]
 
 
-def review_pending(db: sqlite3.Connection, limit: int = 50) -> list[MemoryItemRecord]:
+def review_pending(db: sqlite3.Connection, limit: int = 50, owner: Optional[str] = None) -> list[MemoryItemRecord]:
     """Return memory items awaiting owner confirmation."""
-    return list_memory_items(pending_review=True, include_deleted=False, db=db, limit=limit)
+    return list_memory_items(pending_review=True, include_deleted=False, db=db, limit=limit, owner=owner)
 
 
 def confirm(
     item_id: str,
     db: sqlite3.Connection,
     chroma_client: Optional[Any] = None,
+    owner: Optional[str] = None,
 ) -> MemoryItemRecord:
     """Confirm a pending memory item, marking it trusted (pending_review=0)."""
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -184,24 +183,25 @@ def confirm(
             """
             UPDATE memory_items
             SET pending_review = 0, updated_at = ?
-            WHERE id = ? AND deleted = 0
+            WHERE id = ? AND deleted = 0 AND COALESCE(user_id,'')=?
             """,
-            (now_iso, item_id),
+            (now_iso, item_id, owner or ""),
         )
     if cursor.rowcount == 0:
         raise ValueError(f"Memory item '{item_id}' not found or already deleted.")
 
-    item = get_memory_item(item_id, db)
+    item = get_memory_item(item_id, db, owner=owner)
     if item:
         doc_text = f"Key: {item.key}\n{item.value}" if item.key else item.value
         meta = {
+            "user_id": owner or "",
             "id": item.id,
             "kind": item.kind,
             "key": item.key or "",
             "pending_review": "0",
             "source_session_id": item.source_session_id or "",
         }
-        _sync_to_chroma(item_id, doc_text, meta, client=chroma_client)
+        _sync_to_chroma(item_id, doc_text, meta, client=chroma_client, db=db)
 
     logger.info("[memory] Confirmed memory item %s", item_id)
     return item  # type: ignore[return-value]
@@ -214,12 +214,13 @@ def update_memory_item(
     pending_review: Optional[bool] = None,
     db: Optional[sqlite3.Connection] = None,
     chroma_client: Optional[Any] = None,
+    owner: Optional[str] = None,
 ) -> MemoryItemRecord:
     """Update fields on an existing memory item."""
     if db is None:
         raise ValueError("A database connection is required.")
 
-    item = get_memory_item(item_id, db)
+    item = get_memory_item(item_id, db, owner=owner)
     if not item or item.deleted:
         raise ValueError(f"Memory item '{item_id}' not found or deleted.")
 
@@ -233,22 +234,23 @@ def update_memory_item(
             """
             UPDATE memory_items
             SET value = ?, key = ?, pending_review = ?, updated_at = ?
-            WHERE id = ?
+            WHERE id = ? AND COALESCE(user_id,'')=?
             """,
-            (new_val, new_key, 1 if new_pending else 0, now_iso, item_id),
+            (new_val, new_key, 1 if new_pending else 0, now_iso, item_id, owner or ""),
         )
 
-    updated = get_memory_item(item_id, db)
+    updated = get_memory_item(item_id, db, owner=owner)
     if updated:
         doc_text = f"Key: {updated.key}\n{updated.value}" if updated.key else updated.value
         meta = {
+            "user_id": owner or "",
             "id": updated.id,
             "kind": updated.kind,
             "key": updated.key or "",
             "pending_review": "1" if updated.pending_review else "0",
             "source_session_id": updated.source_session_id or "",
         }
-        _sync_to_chroma(item_id, doc_text, meta, client=chroma_client)
+        _sync_to_chroma(item_id, doc_text, meta, client=chroma_client, db=db)
 
     logger.info("[memory] Updated memory item %s", item_id)
     return updated  # type: ignore[return-value]

@@ -414,3 +414,15 @@ def test_enforcement_blocks_dispatch_for_disabled_agent(
         resp = client.post("/dispatch", json={"command": "check my unread emails and inbox"})
     assert resp.status_code == 403
     assert resp.json()["error"] == "AGENT_DISABLED"
+
+
+def test_provider_error_details_are_not_stored_in_jobs_or_steps(clean_db):
+    job = JobService.create_job('research_agent', 'Private provider failure', clean_db)
+    claimed = JobService.claim_job('worker-1', clean_db, job.id)
+    def fail(messages):
+        raise RuntimeError('Authorization: Bearer private-provider-secret')
+    result = run_job(claimed, clean_db, worker_id='worker-1', llm_client=fail)
+    assert result.status == 'failed'
+    assert 'private-provider-secret' not in result.error
+    for row in clean_db.execute('SELECT output_json FROM job_steps WHERE job_id=?', (job.id,)).fetchall():
+        assert 'private-provider-secret' not in (row[0] or '')

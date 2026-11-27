@@ -16,7 +16,7 @@ def test_pipeline_submission_is_durable(db, monkeypatch):
         assert response.status_code == 202
         job = JobService.get_job(response.json()['job_id'], db)
         assert job.status == 'queued' and job.work_kind == 'pipeline'
-        monkeypatch.setattr('orchestrator_core.core.pipeline_engine.run_pipeline', lambda *_: 'known-run')
+        monkeypatch.setattr('orchestrator_core.core.pipeline_engine.run_pipeline', lambda *_, owner=None: 'known-run')
         result = run_background_job(job, db)
         assert result.status == 'succeeded' and 'known-run' in result.result_json
     finally:

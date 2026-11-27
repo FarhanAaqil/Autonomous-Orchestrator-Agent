@@ -7,7 +7,7 @@ class JobEventHub:
     def __init__(self, history_size=200):
         self.history_size = history_size
 
-    def publish(self, event_type, data, db=None):
+    def publish(self, event_type, data, db=None, owner=None):
         if event_type.startswith('job.'):
             return  # Database triggers capture these atomically.
         from orchestrator_core.storage.db import get_db
@@ -18,25 +18,25 @@ class JobEventHub:
             with transaction(db):
                 if getattr(db, 'dialect', None) == 'postgresql':
                     db.execute('SELECT pg_advisory_xact_lock(74201903)')
-                db.execute('INSERT INTO job_events(event,data_json) VALUES (?,?)', (event_type, json.dumps(data)))
+                db.execute('INSERT INTO job_events(event,data_json,user_id) VALUES (?,?,?)', (event_type, json.dumps(data), owner))
         finally:
             if own:
                 db.close()
 
-    def read(self, after, session_token=None):
+    def read(self, after, session_token=None, owner=None):
         from orchestrator_core.storage.db import get_db
         from orchestrator_core.core.identity import principal
         db = get_db()
         try:
             if session_token and not principal(db, session_token):
                 return None, None
-            bounds = db.execute('SELECT MIN(id),MAX(id) FROM job_events').fetchone()
-            rows = db.execute('SELECT * FROM job_events WHERE id>? ORDER BY id LIMIT 100', (after,)).fetchall()
+            bounds = db.execute("SELECT MIN(id),MAX(id) FROM job_events WHERE COALESCE(user_id,'')=?", (owner or '',)).fetchone()
+            rows = db.execute("SELECT * FROM job_events WHERE id>? AND COALESCE(user_id,'')=? ORDER BY id LIMIT 100", (after, owner or '')).fetchall()
             return bounds, [dict(row) for row in rows]
         finally:
             db.close()
 
-    async def subscribe(self, last_event_id=None, session_token=None):
+    async def subscribe(self, last_event_id=None, session_token=None, owner=None):
         try:
             cursor = max(0, int(last_event_id or 0))
         except ValueError:
@@ -44,7 +44,7 @@ class JobEventHub:
         yield ': connected\n\n'
         first = True
         while True:
-            bounds, rows = await asyncio.to_thread(self.read, cursor, session_token)
+            bounds, rows = await asyncio.to_thread(self.read, cursor, session_token, owner)
             if rows is None:
                 yield 'event: session.expired\ndata: {}\n\n'
                 return

@@ -16,6 +16,9 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, model_validator
 
+from orchestrator_core.storage.transactions import transaction
+from orchestrator_core.core.plans import require_schedule_capacity
+from orchestrator_core.core.ownership import request_owner
 from orchestrator_core.dependencies import verify_bearer_token
 from orchestrator_core.jobs.service import JobService
 from orchestrator_core.storage.db import get_db_connection, log_audit
@@ -86,9 +89,10 @@ def _row_to_schedule(row: sqlite3.Row) -> ScheduleRecord:
 def list_schedules(
     db: sqlite3.Connection = Depends(get_db_connection),
     _token: Optional[str] = Depends(verify_bearer_token),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """List all configured autonomous schedules."""
-    rows = db.execute("SELECT * FROM schedules ORDER BY created_at ASC").fetchall()
+    rows = db.execute("SELECT * FROM schedules WHERE COALESCE(user_id,'')=? ORDER BY created_at ASC", (owner or "",)).fetchall()
     return [_row_to_schedule(r) for r in rows]
 
 
@@ -97,6 +101,7 @@ def create_schedule(
     body: ScheduleCreate,
     db: sqlite3.Connection = Depends(get_db_connection),
     _token: Optional[str] = Depends(verify_bearer_token),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """Create a new recurring schedule."""
     schedule_id = f"sched_{uuid.uuid4().hex[:10]}"
@@ -105,11 +110,13 @@ def create_schedule(
     from orchestrator_core.core.scheduler import next_occurrence
     following = next_occurrence(body.cron_expr, body.timezone, datetime.now(timezone.utc))
 
-    with db:
+    with transaction(db):
+        if body.is_active:
+            require_schedule_capacity(db, owner)
         db.execute(
             """
-            INSERT INTO schedules (id, name, agent, goal, cron_expr, is_active, created_at, updated_at, timezone, next_run_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO schedules (id, name, agent, goal, cron_expr, is_active, created_at, updated_at, timezone, next_run_at, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 schedule_id,
@@ -122,19 +129,20 @@ def create_schedule(
                 now,
                 body.timezone,
                 following,
+                owner,
             ),
         )
 
     log_audit(
         db,
-        actor="admin",
+        actor=owner or "local-development",
         event="schedule_created",
         entity="schedule",
         entity_id=schedule_id,
         detail={"name": body.name, "agent": body.agent, "cron_expr": body.cron_expr},
     )
 
-    row = db.execute("SELECT * FROM schedules WHERE id = ?", (schedule_id,)).fetchone()
+    row = db.execute("SELECT * FROM schedules WHERE id = ? AND COALESCE(user_id,'')=?", (schedule_id, owner or "")).fetchone()
     return _row_to_schedule(row)
 
 
@@ -143,9 +151,10 @@ def get_schedule(
     schedule_id: str,
     db: sqlite3.Connection = Depends(get_db_connection),
     _token: Optional[str] = Depends(verify_bearer_token),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """Retrieve schedule details by ID."""
-    row = db.execute("SELECT * FROM schedules WHERE id = ?", (schedule_id,)).fetchone()
+    row = db.execute("SELECT * FROM schedules WHERE id = ? AND COALESCE(user_id,'')=?", (schedule_id, owner or "")).fetchone()
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Schedule '{schedule_id}' not found")
     return _row_to_schedule(row)
@@ -157,9 +166,10 @@ def update_schedule(
     body: ScheduleUpdate,
     db: sqlite3.Connection = Depends(get_db_connection),
     _token: Optional[str] = Depends(verify_bearer_token),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """Update schedule properties or active state."""
-    row = db.execute("SELECT * FROM schedules WHERE id = ?", (schedule_id,)).fetchone()
+    row = db.execute("SELECT * FROM schedules WHERE id = ? AND COALESCE(user_id,'')=?", (schedule_id, owner or "")).fetchone()
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Schedule '{schedule_id}' not found")
 
@@ -196,12 +206,14 @@ def update_schedule(
 
     updates.append("updated_at = ?")
     params.append(now)
-    params.append(schedule_id)
+    params.extend([schedule_id, owner or ""])
 
-    with db:
-        db.execute(f"UPDATE schedules SET {', '.join(updates)} WHERE id = ?", params)
+    with transaction(db):
+        if body.is_active is True or (body.is_active is None and row["is_active"]):
+            require_schedule_capacity(db, owner, excluding=schedule_id)
+        db.execute(f"UPDATE schedules SET {', '.join(updates)} WHERE id = ? AND COALESCE(user_id,'')=?", params)
 
-    updated_row = db.execute("SELECT * FROM schedules WHERE id = ?", (schedule_id,)).fetchone()
+    updated_row = db.execute("SELECT * FROM schedules WHERE id = ? AND COALESCE(user_id,'')=?", (schedule_id, owner or "")).fetchone()
     return _row_to_schedule(updated_row)
 
 
@@ -210,16 +222,17 @@ def delete_schedule(
     schedule_id: str,
     db: sqlite3.Connection = Depends(get_db_connection),
     _token: Optional[str] = Depends(verify_bearer_token),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """Delete a schedule."""
     with db:
-        cur = db.execute("DELETE FROM schedules WHERE id = ?", (schedule_id,))
+        cur = db.execute("DELETE FROM schedules WHERE id = ? AND COALESCE(user_id,'')=?", (schedule_id, owner or ""))
         if cur.rowcount == 0:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Schedule '{schedule_id}' not found")
 
     log_audit(
         db,
-        actor="admin",
+        actor=owner or "local-development",
         event="schedule_deleted",
         entity="schedule",
         entity_id=schedule_id,
@@ -233,9 +246,10 @@ def run_schedule_now(
     schedule_id: str,
     db: sqlite3.Connection = Depends(get_db_connection),
     _token: Optional[str] = Depends(verify_bearer_token),
+    owner: Optional[str] = Depends(request_owner),
 ):
     """Trigger immediate execution of a schedule by enqueueing an autonomous job."""
-    row = db.execute("SELECT * FROM schedules WHERE id = ?", (schedule_id,)).fetchone()
+    row = db.execute("SELECT * FROM schedules WHERE id = ? AND COALESCE(user_id,'')=?", (schedule_id, owner or "")).fetchone()
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Schedule '{schedule_id}' not found")
 
@@ -247,14 +261,15 @@ def run_schedule_now(
         goal=f"[Scheduled: {schedule.name}] {schedule.goal}",
         db=db,
         schedule_id=schedule.id,
+        owner=owner,
     )
 
     with db:
-        db.execute("UPDATE schedules SET last_run_at = ?, updated_at = ? WHERE id = ?", (now, now, schedule_id))
+        db.execute("UPDATE schedules SET last_run_at = ?, updated_at = ? WHERE id = ? AND COALESCE(user_id,'')=?", (now, now, schedule_id, owner or ""))
 
     log_audit(
         db,
-        actor="admin",
+        actor=owner or "local-development",
         event="schedule_triggered_manually",
         entity="schedule",
         entity_id=schedule_id,

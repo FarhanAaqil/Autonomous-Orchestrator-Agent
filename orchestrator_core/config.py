@@ -12,6 +12,7 @@ from typing import Literal, Optional
 from dotenv import load_dotenv
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from orchestrator_core.version import VERSION
 
 # Preload .env into os.environ so all standard library / SDK modules have access
 load_dotenv(override=False)
@@ -33,11 +34,22 @@ class Settings(BaseSettings):
     environment: Literal["development", "staging", "production"] = "development"
     allow_insecure_local: bool = False
     action_execution_mode: Literal["disabled", "simulation", "live"] = "disabled"
-    app_version: str = "1.0.0"
+    @property
+    def app_version(self) -> str:
+        return VERSION
     executor_hmac_secret: str = Field(
         default="aaqil-secret-hmac-key-dev-environment",
         validation_alias=AliasChoices("executor_hmac_secret", "EXECUTOR_HMAC_SECRET"),
     )
+
+    public_registration: bool = False
+    public_base_url: str = "http://127.0.0.1:8080"
+    smtp_host: Optional[str] = None
+    smtp_port: int = 587
+    smtp_username: Optional[str] = None
+    smtp_password: Optional[str] = Field(default=None, repr=False)
+    smtp_from: Optional[str] = None
+    smtp_tls: Literal['starttls', 'ssl'] = 'starttls'
 
     # External integrations & credentials
     email_address: Optional[str] = Field(
@@ -64,15 +76,6 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("devto_api_key", "DEVTO_API_KEY"),
     )
-    linkedin_email: Optional[str] = Field(
-        default=None,
-        validation_alias=AliasChoices("linkedin_email", "LINKEDIN_EMAIL"),
-    )
-    linkedin_password: Optional[str] = Field(
-        default=None,
-        validation_alias=AliasChoices("linkedin_password", "LINKEDIN_PASSWORD"),
-    )
-
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -84,6 +87,9 @@ class Settings(BaseSettings):
         token = (self.auth_token or "").strip()
         if not token and (secured or not self.allow_insecure_local):
             raise ValueError("AUTH_TOKEN is required; local development must explicitly set ALLOW_INSECURE_LOCAL=true")
+        if secured and self.public_registration:
+            if not self.public_base_url.startswith('https://') or not self.smtp_host or not self.smtp_from:
+                raise ValueError('Public signup requires HTTPS PUBLIC_BASE_URL and SMTP delivery settings')
         if secured:
             from urllib.parse import urlsplit, unquote
             database = urlsplit(self.database_url or '')

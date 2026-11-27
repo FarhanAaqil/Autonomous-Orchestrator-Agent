@@ -38,6 +38,10 @@ class PublicationPayload(ActionPayload):
     content: str = Field(min_length=1, max_length=100_000)
 
 
+class HashnodePayload(PublicationPayload):
+    publication_id: str | None = Field(default=None, pattern=r"^[a-fA-F0-9]{24}$")
+
+
 class IssuePayload(ActionPayload):
     repo: str = Field(pattern=r"^[\w.-]+/[\w.-]+$")
     title: str = Field(min_length=1, max_length=500)
@@ -59,15 +63,15 @@ class ActionSpec:
     schema: type[ActionPayload]
     target_field: str | None
     agents: frozenset[str]
-    adapter: Literal["smtp", "unavailable"] = "unavailable"
+    adapter: Literal["smtp", "personal", "unavailable"] = "unavailable"
 
 
 ACTION_CATALOG = {
     "send_email": ActionSpec(EmailPayload, "to_email", frozenset({"email_agent", "orchestrator"}), "smtp"),
-    "publish_hashnode": ActionSpec(PublicationPayload, None, frozenset({"growth_content_agent", "orchestrator"})),
-    "publish_devto": ActionSpec(PublicationPayload, None, frozenset({"growth_content_agent", "orchestrator"})),
-    "github_create_issue": ActionSpec(IssuePayload, "repo", frozenset({"github_agent", "orchestrator"})),
-    "github_comment": ActionSpec(CommentPayload, "repo", frozenset({"github_agent", "orchestrator"})),
+    "publish_hashnode": ActionSpec(HashnodePayload, "publication_id", frozenset({"growth_content_agent", "orchestrator"}), "personal"),
+    "publish_devto": ActionSpec(PublicationPayload, None, frozenset({"growth_content_agent", "orchestrator"}), "personal"),
+    "github_create_issue": ActionSpec(IssuePayload, "repo", frozenset({"github_agent", "orchestrator"}), "personal"),
+    "github_comment": ActionSpec(CommentPayload, "repo", frozenset({"github_agent", "orchestrator"}), "personal"),
     "linkedin_post": ActionSpec(SocialPayload, None, frozenset({"linkedin_agent", "orchestrator"})),
 }
 ACTION_ALIASES = {"github_issue": "github_create_issue", "github_issue_create": "github_create_issue", "linkedin_post_text": "linkedin_post"}
@@ -92,15 +96,15 @@ def normalize_action(action_type, payload, target=None):
         canonical = spec.schema.model_validate(data).model_dump(exclude_none=True)
     except ValidationError as exc:
         raise SecurityPolicyViolationError(f"Invalid {name} payload: {exc.error_count()} field error(s)") from exc
-    canonical_target = canonical[spec.target_field] if spec.target_field else name
+    canonical_target = canonical.get(spec.target_field, name) if spec.target_field else name
     if any(str(t).strip() != canonical_target for t in (target, declared_target) if t is not None):
         raise SecurityPolicyViolationError("Target does not match the canonical action recipient")
     return name, canonical, canonical_target
 
 
-def require_adapter(action_type):
+def require_adapter(action_type, personal=False):
     spec = ACTION_CATALOG.get(action_type)
-    if spec is None or spec.adapter == "unavailable":
+    if spec is None or spec.adapter == "unavailable" or (spec.adapter == "personal" and not personal):
         raise SecurityPolicyViolationError(f"No execution adapter is available for {action_type}")
 
 

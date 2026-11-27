@@ -68,5 +68,5 @@ def browser_read(
         logger.warning("Sandbox security policy blocked browser navigation to %s: %s", url, sec_err)
         return sanitize_observation(f"Security Policy Violation: {sec_err}", source="browser_sandbox_security")
     except Exception as exc:
-        logger.warning("browser_read failed for %s: %s", url, exc)
+        logger.warning("browser_read failed: %s", type(exc).__name__)
         return sanitize_observation(f"Error browsing page {url}: {exc}", source="browser_read")

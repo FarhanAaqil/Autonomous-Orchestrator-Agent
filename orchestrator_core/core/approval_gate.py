@@ -38,6 +38,7 @@ from typing import Any, Optional
 
 from orchestrator_core.config import get_settings
 from orchestrator_core.core.action_catalog import normalize_action, require_adapter
+from orchestrator_core.core.ownership import execution_owner
 from orchestrator_core.core.policy import execution_origin, require_execution
 from orchestrator_core.exceptions import (
     ApprovalAlreadyExecutedError,
@@ -143,6 +144,7 @@ def evaluate_target_policy(
     action_type: str,
     target: Optional[str],
     db: sqlite3.Connection,
+    owner: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     SEC-08: Evaluate recipient/target policy.
@@ -164,8 +166,8 @@ def evaluate_target_policy(
 
     # Check prior successful executions
     prior = db.execute(
-        "SELECT 1 FROM approvals WHERE target = ? AND status = 'confirmed' LIMIT 1",
-        (target,),
+        "SELECT 1 FROM approvals WHERE target = ? AND status = 'confirmed' AND COALESCE(user_id,'')=? LIMIT 1",
+        (target, owner or ""),
     ).fetchone()
 
     is_first_time = prior is None
@@ -201,6 +203,15 @@ def atomic_decision(fn):
     return wrapped
 
 
+def account_execution_mode(db, owner):
+    if owner is None:
+        return get_settings().action_execution_mode
+    row = db.execute('SELECT execution_mode,email_verified_at FROM users WHERE id=? AND active=1', (owner,)).fetchone()
+    if not row or (row['execution_mode'] == 'live' and not row['email_verified_at']):
+        raise SecurityPolicyViolationError('An active verified account is required for live execution.')
+    return row['execution_mode']
+
+
 @atomic_decision
 def request_approval(
     action_type: str,
@@ -219,6 +230,9 @@ def request_approval(
     Stores canonical payload and bound payload_hash.
     """
     action_type, payload, target = normalize_action(action_type, payload, target)
+    owner = execution_owner.get()
+    if idempotency_key is not None and owner is not None:
+        idempotency_key = hashlib.sha256(f'{owner}:{idempotency_key}'.encode()).hexdigest()
     origin_agent, origin_session = execution_origin.get()
     source_agent = source_agent or origin_agent
     session_id = session_id or origin_session
@@ -232,19 +246,19 @@ def request_approval(
         ).fetchone()
         if existing:
             if (existing["status"] not in ("pending", "approved")
-                    or existing["payload_hash"] != compute_payload_hash(action_type, payload, target, get_settings().action_execution_mode)
+                    or existing["payload_hash"] != compute_payload_hash(action_type, payload, target, account_execution_mode(db, owner))
                     or existing["source_agent"] != source_agent or existing["session_id"] != session_id):
                 raise IdempotencyConflictError(idempotency_key)
             return existing["id"]
 
     # SEC-08 Policy check
-    policy = evaluate_target_policy(action_type, target, db)
+    policy = evaluate_target_policy(action_type, target, db, owner=owner)
     if not policy["allowed"]:
         raise SecurityPolicyViolationError(policy["reason"])
 
     approval_id = str(uuid.uuid4())
     payload_json = json.dumps(payload, separators=(",", ":"), sort_keys=True)
-    payload_hash = compute_payload_hash(action_type, payload, target, get_settings().action_execution_mode)
+    payload_hash = compute_payload_hash(action_type, payload, target, account_execution_mode(db, owner))
     idempotency_key = idempotency_key or f"idem_{approval_id}"
     created_at = datetime.now(timezone.utc)
     expires_at = created_at + timedelta(hours=expiry_hours)
@@ -253,9 +267,9 @@ def request_approval(
         """
         INSERT INTO approvals (
             id, action_type, payload_json, target, payload_hash,
-            status, idempotency_key, created_at, expires_at, source_agent, session_id, execution_mode
+            status, idempotency_key, created_at, expires_at, source_agent, session_id, execution_mode, user_id
         )
-        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             approval_id,
@@ -268,7 +282,8 @@ def request_approval(
             expires_at.isoformat(),
             source_agent,
             session_id,
-            get_settings().action_execution_mode,
+            account_execution_mode(db, owner),
+            owner,
         ),
     )
 
@@ -303,7 +318,10 @@ def request_approval(
 # ── State transitions ──────────────────────────────────────────────────────────
 
 def _consent_context(row) -> str:
-    return json.dumps([row["source_agent"], row["session_id"], row["expires_at"], row["execution_mode"]], separators=(",", ":"))
+    fields = [row["source_agent"], row["session_id"], row["expires_at"], row["execution_mode"]]
+    if row["user_id"] is not None:
+        fields.append(row["user_id"])
+    return json.dumps(fields, separators=(",", ":"))
 
 
 @atomic_decision
@@ -355,7 +373,9 @@ def approve(
         raise ApprovalTamperedError(approval_id)
 
     # SEC-03: Sign approval with HMAC
-    require_adapter(row["action_type"])
+    require_adapter(row["action_type"], personal=row["user_id"] is not None)
+    if row['action_type'] == 'publish_hashnode' and row['execution_mode'] == 'live' and not json.loads(row['payload_json']).get('publication_id'):
+        raise SecurityPolicyViolationError('Choose a Hashnode publication in a revised proposal before approving.')
     decided_at = datetime.now(timezone.utc).isoformat()
     approved_hash = stored_hash
     signature = generate_approval_signature(approval_id, approved_hash, decided_at, context=_consent_context(row))
@@ -446,13 +466,13 @@ def edit_and_supersede(
     action_type, new_payload, target = normalize_action(action_type, new_payload, new_target)
 
     # SEC-08 Policy check
-    policy = evaluate_target_policy(action_type, target, db)
+    policy = evaluate_target_policy(action_type, target, db, owner=row["user_id"])
     if not policy["allowed"]:
         raise SecurityPolicyViolationError(policy["reason"])
 
     new_id = str(uuid.uuid4())
     new_payload_json = json.dumps(new_payload, separators=(",", ":"), sort_keys=True)
-    new_payload_hash = compute_payload_hash(action_type, new_payload, target, get_settings().action_execution_mode)
+    new_payload_hash = compute_payload_hash(action_type, new_payload, target, account_execution_mode(db, row["user_id"]))
     new_idempotency_key = f"idem_{new_id}"
     created_at = datetime.now(timezone.utc)
     expires_at = created_at + timedelta(hours=expiry_hours)
@@ -467,9 +487,9 @@ def edit_and_supersede(
         """
         INSERT INTO approvals (
             id, action_type, payload_json, target, payload_hash,
-            status, idempotency_key, supersedes_id, created_at, expires_at, source_agent, session_id, execution_mode
+            status, idempotency_key, supersedes_id, created_at, expires_at, source_agent, session_id, execution_mode, user_id
         )
-        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             new_id,
@@ -483,7 +503,8 @@ def edit_and_supersede(
             expires_at.isoformat(),
             row["source_agent"],
             row["session_id"],
-            get_settings().action_execution_mode,
+            account_execution_mode(db, row["user_id"]),
+            row["user_id"],
         ),
     )
 
@@ -545,7 +566,7 @@ def execute_approved(approval_id: str, db: sqlite3.Connection) -> dict:
     row = db.execute(
         """
         SELECT id, action_type, payload_json, target, payload_hash, status,
-               idempotency_key, approval_signature, approved_hash, decided_at, expires_at, source_agent, session_id, version, execution_mode
+               idempotency_key, approval_signature, approved_hash, decided_at, expires_at, source_agent, session_id, version, execution_mode, user_id
         FROM approvals
         WHERE id = ?
         """,
@@ -624,14 +645,35 @@ def execute_approved(approval_id: str, db: sqlite3.Connection) -> dict:
         )
         raise ApprovalSignatureInvalidError(approval_id)
 
-    if row["execution_mode"] != get_settings().action_execution_mode:
+    if row["execution_mode"] != account_execution_mode(db, row["user_id"]):
         raise SecurityPolicyViolationError("Execution mode changed; edit and review a new proposal.")
+    # Resolve personal credentials before claiming; missing grants have no side effect.
+    personal_token = None
+    personal_provider = None
+    if row['user_id'] is not None and row['execution_mode'] == 'live':
+        personal_provider = {'send_email': 'gmail_send', 'github_create_issue': 'github', 'github_comment': 'github', 'publish_devto': 'devto', 'publish_hashnode': 'hashnode'}.get(row['action_type'])
+        if not personal_provider:
+            raise SecurityPolicyViolationError('This personal publishing adapter is not available.')
+        if row['action_type'] == 'publish_hashnode' and not json.loads(row['payload_json']).get('publication_id'):
+            raise SecurityPolicyViolationError('Edit the proposal to include a Hashnode publication_id, then review it again.')
+        from orchestrator_core.core.personal_providers import access_token
+        scopes = ['https://www.googleapis.com/auth/gmail.send'] if personal_provider == 'gmail_send' else []
+        personal_token = access_token(db, row['user_id'], personal_provider, scopes)
     attempt_id = str(uuid.uuid4())
     started_at = datetime.now(timezone.utc).isoformat()
     db.execute("BEGIN IMMEDIATE")
     with db:
         require_execution(db, row["source_agent"] or "orchestrator", row["action_type"])
-        target_policy = evaluate_target_policy(row["action_type"], row["target"], db)
+        if row['execution_mode'] != account_execution_mode(db, row['user_id']):
+            raise SecurityPolicyViolationError('Execution mode changed; review a new proposal.')
+        if row['user_id'] is not None and row['execution_mode'] == 'live':
+            if not db.execute("SELECT 1 FROM connections WHERE user_id=? AND provider=? AND status='connected'", (row['user_id'], personal_provider)).fetchone():
+                raise SecurityPolicyViolationError('Reconnect the personal provider before executing.')
+            from orchestrator_core.core.plans import require_capacity
+            used = db.execute("SELECT COUNT(*) FROM execution_attempts e JOIN approvals a ON a.id=e.approval_id WHERE e.user_id=? AND a.action_type='send_email' AND a.execution_mode='live' AND substr(e.started_at,1,10)=?", (row['user_id'], started_at[:10])).fetchone()[0]
+            if row['action_type'] == 'send_email':
+                require_capacity(db, row['user_id'], 'emails_per_day', used)
+        target_policy = evaluate_target_policy(row["action_type"], row["target"], db, owner=row["user_id"])
         if not target_policy["allowed"]:
             raise SecurityPolicyViolationError(target_policy["reason"])
         if datetime.fromisoformat(row["expires_at"]) <= datetime.now(timezone.utc):
@@ -643,14 +685,17 @@ def execute_approved(approval_id: str, db: sqlite3.Connection) -> dict:
         if changed.rowcount != 1:
             raise ApprovalClaimConflictError(approval_id)
         db.execute(
-            "INSERT INTO execution_attempts (id,approval_id,provider_key,outcome,started_at) VALUES (?,?,?,'outcome_unknown',?)",
-            (attempt_id, approval_id, row["idempotency_key"], started_at),
+            "INSERT INTO execution_attempts (id,approval_id,provider_key,outcome,started_at,user_id) VALUES (?,?,?,'outcome_unknown',?,?)",
+            (attempt_id, approval_id, row["idempotency_key"], started_at, row["user_id"]),
         )
         log_audit(db, actor="executor", event="execution_attempted", entity_id=approval_id,
                   detail={"attempt_id": attempt_id, "provider_key": row["idempotency_key"]})
 
     try:
-        result = _dispatch_action(row["action_type"], json.loads(row["payload_json"]), approval_id)
+        if row['user_id'] is not None:
+            result = _dispatch_personal(row['action_type'], json.loads(row['payload_json']), approval_id, row['execution_mode'], personal_token)
+        else:
+            result = _dispatch_action(row["action_type"], json.loads(row["payload_json"]), approval_id)
         if not isinstance(result, dict) or result.get("outcome") not in ("simulated", "submitted", "confirmed", "failed", "outcome_unknown"):
             raise RuntimeError("Adapter returned no valid execution outcome")
     except Exception as exc:
@@ -742,3 +787,82 @@ def _dispatch_action(action_type: str, payload: dict[str, Any], approval_id: str
             server.close()
         except Exception:
             logger.warning("SMTP connection cleanup failed")
+
+
+def _dispatch_personal(action_type, payload, approval_id, mode, token):
+    """SDK_EXECUTOR: personal writes never fall back to operator credentials."""
+    require_adapter(action_type, personal=True)
+    action_type, payload, _ = normalize_action(action_type, payload)
+    if mode == 'simulation':
+        return {'outcome': 'simulated', 'receipt': {'mode': 'simulation', 'external_effect': False}}
+    if mode != 'live' or not token:
+        return {'outcome': 'failed', 'error_class': 'PersonalConnectionRequired'}
+    if action_type != 'send_email':
+        return _publish_personal(action_type, payload, token)
+    import base64
+    import requests
+    from email.message import EmailMessage
+    message = EmailMessage()
+    message['To'] = payload['to_email']
+    message['Subject'] = payload['subject']
+    message['Message-ID'] = '<' + approval_id + '@orchestrator.local>'
+    message.set_content(payload['body'])
+    raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+    try:
+        response = requests.post('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', headers={'Authorization': 'Bearer ' + token}, json={'raw': raw}, timeout=20, allow_redirects=False)
+        if response.status_code in (400, 401, 403, 404, 429):
+            return {'outcome': 'failed', 'error_class': 'ProviderRejected'}
+        if response.status_code == 200:
+            identifier = response.json().get('id')
+            if identifier:
+                return {'outcome': 'submitted', 'receipt': {'provider': 'gmail', 'message_id': identifier}}
+        return {'outcome': 'outcome_unknown', 'error_class': 'UnconfirmedProviderResponse'}
+    except (requests.RequestException, ValueError):
+        return {'outcome': 'outcome_unknown', 'error_class': 'UnconfirmedProviderResponse'}
+
+
+def _publish_personal(action_type, payload, token):
+    """SDK_EXECUTOR: one request, no retries after an uncertain external effect."""
+    import requests
+    headers = {'Authorization': 'Bearer ' + token, 'Accept': 'application/json'}
+    if action_type in ('github_create_issue', 'github_comment'):
+        provider = 'github'
+        url = 'https://api.github.com/repos/' + payload['repo'] + '/issues'
+        body = {'body': payload['body']}
+        if action_type == 'github_create_issue':
+            body['title'] = payload['title']
+        else:
+            url += '/' + str(payload['issue_number']) + '/comments'
+        headers['Accept'] = 'application/vnd.github+json'
+        expected = 201
+    elif action_type == 'publish_devto':
+        provider = 'devto'
+        url = 'https://dev.to/api/articles'
+        headers = {'api-key': token, 'Accept': 'application/vnd.forem.api-v1+json'}
+        body = {'article': {'title': payload['title'], 'body_markdown': payload['content'], 'published': True}}
+        expected = 201
+    elif action_type == 'publish_hashnode':
+        if not payload.get('publication_id'):
+            return {'outcome': 'failed', 'error_class': 'PublicationRequired'}
+        provider = 'hashnode'
+        url = 'https://gql-beta.hashnode.com'
+        headers['x-hashnode-client'] = 'toji-orchestrator'
+        body = {'query': 'mutation ($input: PublishPostInput!) { publishPost(input: $input) { post { id } } }', 'variables': {'input': {'publicationId': payload['publication_id'], 'title': payload['title'], 'contentMarkdown': payload['content']}}}
+        expected = 200
+    else:
+        return {'outcome': 'failed', 'error_class': 'UnsupportedPersonalAction'}
+    try:
+        response = requests.post(url, headers=headers, json=body, timeout=20, allow_redirects=False)
+        if response.status_code in (400, 401, 403, 404, 422, 429):
+            return {'outcome': 'failed', 'error_class': 'ProviderRejected'}
+        if response.status_code == expected:
+            data = response.json()
+            if provider == 'hashnode':
+                data = (data.get('data') or {}).get('publishPost') or {}
+                data = data.get('post') or {}
+            identifier = data.get('id')
+            if isinstance(identifier, (str, int)) and not isinstance(identifier, bool) and identifier:
+                return {'outcome': 'submitted', 'receipt': {'provider': provider, 'id': str(identifier)}}
+        return {'outcome': 'outcome_unknown', 'error_class': 'UnconfirmedProviderResponse'}
+    except (requests.RequestException, ValueError, TypeError, AttributeError):
+        return {'outcome': 'outcome_unknown', 'error_class': 'UnconfirmedProviderResponse'}

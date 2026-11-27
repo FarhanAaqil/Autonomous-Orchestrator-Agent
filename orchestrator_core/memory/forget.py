@@ -25,6 +25,7 @@ def forget(
     db: sqlite3.Connection,
     chroma_client: Optional[Any] = None,
     purge_vector: bool = True,
+    owner: Optional[str] = None,
 ) -> bool:
     """
     Delete a memory item from SQLite and purge from vector storage.
@@ -37,9 +38,9 @@ def forget(
             """
             UPDATE memory_items
             SET deleted = 1, updated_at = ?
-            WHERE id = ? AND deleted = 0
+            WHERE id = ? AND deleted = 0 AND COALESCE(user_id,'')=?
             """,
-            (now_iso, item_id),
+            (now_iso, item_id, owner or ""),
         )
 
     if cursor.rowcount == 0:
@@ -53,7 +54,7 @@ def forget(
             coll.delete(ids=[item_id])
             logger.info("[memory] Purged vector for memory item %s from ChromaDB.", item_id)
         except Exception as exc:
-            logger.warning("[memory] Vector purge failed for item %s: %s", item_id, exc)
+            logger.warning("[memory] Vector purge failed for item %s: %s", item_id, type(exc).__name__)
 
     logger.info("[memory] Forgotten memory item %s successfully.", item_id)
     return True

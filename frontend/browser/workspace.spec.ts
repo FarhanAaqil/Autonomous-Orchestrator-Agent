@@ -49,7 +49,7 @@ test('WebGL absence preserves the agent list and keyboard navigation', async ({p
 });
 async function login(page: Page, username = 'browser-admin') {
   await page.goto('/');
-  await page.getByLabel('Username', {exact:true}).fill(username);
+  await page.getByLabel('Email or administrator username', {exact:true}).fill(username);
   await page.getByLabel('Password', {exact:true}).fill('browser-fixture-password-123');
   await page.getByRole('button', {name:'Enter workspace'}).click();
   await expect(page.getByRole('heading', {name:'Hello, ' + username + '.'})).toBeVisible();
@@ -151,4 +151,43 @@ test('revoked sessions close live events and return to login', async ({page}) =>
   await page.request.post('/auth/logout',{headers:{'X-CSRF-Token':token}});
   await expect(page.getByRole('heading',{name:'Welcome back.'})).toBeVisible({timeout:18000});
   await expect(page.getByText('Your session ended. Sign in to continue.')).toBeVisible();
+});
+
+
+test('settings shows personal usage without exposing other accounts', async ({page}) => {
+  await login(page, 'browser-viewer');
+  await page.getByRole('button', {name:'Settings', exact:true}).click();
+  await expect(page.getByRole('heading', {name:'Your plan & usage'})).toBeVisible();
+  await expect(page.getByRole('heading', {name:'Free plan'})).toBeVisible();
+  await expect(page.getByText('Runs today', {exact:true})).toBeVisible();
+  const account = await (await page.request.get('/account')).json();
+  expect(account.usage.runs).toBe(0);
+  expect(account.limits.runs_per_day).toBe(10);
+  expect(account.password_hash).toBeUndefined();
+  expect((await (await page.request.get('/conversations')).json())).toEqual([]);
+  expect((await page.request.get('/conversations/long-history')).status()).toBe(404);
+});
+
+
+test('personal export excludes another account and downloads JSON', async ({page}) => {
+  await login(page, 'browser-viewer');
+  await page.getByRole('button', {name:'Settings', exact:true}).click();
+  const response = page.waitForResponse(r => r.url().endsWith('/account/export'));
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', {name:'Export my data', exact:true}).click();
+  expect((await download).suggestedFilename()).toBe('toji-account.json');
+  const data = await (await response).json();
+  expect(data.profile.username).toBe('browser-viewer');
+  expect(data.profile.password_hash).toBeUndefined();
+  expect(data.records.conversations).toEqual([]);
+  expect(data.records.messages).toEqual([]);
+});
+
+test('starter templates fill a brief without submitting work', async ({page}) => {
+  await login(page);
+  let submitted = false;
+  page.on('request', r => {if (r.method() === 'POST' && r.url().includes('/dispatch')) submitted = true;});
+  await page.getByRole('button', {name:'Prepare an application', exact:true}).click();
+  await expect(page.getByLabel('Your message', {exact:true})).toHaveValue(/Ask for my experience/);
+  expect(submitted).toBe(false);
 });

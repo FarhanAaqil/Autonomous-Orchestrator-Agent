@@ -31,7 +31,7 @@ def password_hash(password):
     return hasher.hash(password)
 
 
-def create_user(db, username, password, role='operator', *, bootstrap=False, actor='administrator'):
+def create_user(db, username, password, role='operator', *, bootstrap=False, actor='administrator', verified=True):
     username = username.strip().lower()
     if not username or len(username) > 100 or role not in ('administrator', 'operator', 'viewer'):
         raise ValueError('Invalid username or role')
@@ -41,8 +41,11 @@ def create_user(db, username, password, role='operator', *, bootstrap=False, act
     try:
         if bootstrap and db.execute('SELECT 1 FROM users LIMIT 1').fetchone():
             raise ValueError('Bootstrap is unavailable after the first account exists')
-        db.execute('INSERT INTO users (id,username,password_hash,role,created_at) VALUES (?,?,?,?,?)',
-                   (user_id, username, encoded, role, now().isoformat()))
+        db.execute('INSERT INTO users (id,username,password_hash,role,created_at,email,email_verified_at) VALUES (?,?,?,?,?,?,?)',
+                   (user_id, username, encoded, role, now().isoformat(), username, now().isoformat() if verified else None))
+        if bootstrap:
+            from orchestrator_core.core.ownership import adopt_legacy_rows
+            adopt_legacy_rows(db, user_id)
         log_audit(db, actor, 'account_created', 'user', user_id, {'role': role})
         db.commit()
     except BaseException:
@@ -78,7 +81,7 @@ def login(db, username, password, address):
         valid = hasher.verify(row['password_hash'] if row else _dummy, password)
     except (VerificationError, InvalidHashError):
         valid = False
-    if not valid or not row or not row['active']:
+    if not valid or not row or not row['active'] or not row['email_verified_at']:
         log_audit(db, 'anonymous', 'login_failed', 'authentication', detail={'account_key': keys[0]})
         return None
     token = secrets.token_urlsafe(48)
@@ -88,8 +91,21 @@ def login(db, username, password, address):
         # from making this in-flight authentication usable.
         db.execute('INSERT INTO sessions (token_hash,user_id,user_version,expires_at,created_at) VALUES (?,?,?,?,?)',
                    (digest(token), row['id'], row['version'], expires, current.isoformat()))
+        db.execute('DELETE FROM login_limits WHERE key=?', (keys[0],))
         log_audit(db, row['id'], 'login_succeeded', 'user', row['id'])
     return token
+
+
+def login_retry_after(db, username, address):
+    """Return lockout duration without revealing whether an account exists."""
+    import math
+    current = now()
+    remaining = 0
+    for key, maximum in (('account:' + digest(username.strip().lower()), 5), ('address:' + digest(address), 30)):
+        row = db.execute('SELECT attempts,reset_at FROM login_limits WHERE key=?', (key,)).fetchone()
+        if row and row['attempts'] >= maximum:
+            remaining = max(remaining, math.ceil((datetime.fromisoformat(row['reset_at']) - current).total_seconds()))
+    return max(0, remaining)
 
 
 def principal(db, token):

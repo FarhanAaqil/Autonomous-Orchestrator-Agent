@@ -1,4 +1,4 @@
-"""Human account lifecycle; no public registration or password recovery."""
+"""Human accounts with opt-in verified registration and single-use recovery."""
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
@@ -25,6 +25,10 @@ def login(body: Credentials, request: Request, response: Response, db=Depends(ge
         raise HTTPException(403, 'Cross-site login is not allowed')
     token = identity.login(db, body.username, body.password, request.client.host if request.client else 'unknown')
     if not token:
+        retry = identity.login_retry_after(db, body.username, request.client.host if request.client else 'unknown')
+        if retry:
+            minutes = (retry + 59) // 60
+            raise HTTPException(429, f'Too many sign-in attempts. Wait {minutes} minute(s) before trying again.', headers={'Retry-After': str(retry)})
         raise HTTPException(401, 'Unable to sign in; check credentials or retry later')
     old = request.cookies.get('orchestrator_session')
     if old:
@@ -85,6 +89,7 @@ def change_password(body: PasswordChange, request: Request, response: Response, 
         if cur.rowcount != 1:
             raise HTTPException(409, 'Account changed; sign in again')
         db.execute('DELETE FROM sessions WHERE user_id=?', (user_id,))
+        db.execute("DELETE FROM account_tokens WHERE user_id=? AND purpose='reset'", (user_id,))
         log_audit(db, user_id, 'password_changed', 'user', user_id)
     response.delete_cookie('orchestrator_session', path='/')
     return {'changed': True, 'sessions_revoked': True}
@@ -110,3 +115,121 @@ def change_access(user_id: str, body: AccessChange, request: Request, db=Depends
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     return {'changed': True, 'sessions_revoked': True}
+
+
+class Signup(BaseModel):
+    email: str = Field(max_length=100)
+    password: str = Field(min_length=14, max_length=1024, repr=False)
+
+
+class EmailRequest(BaseModel):
+    email: str = Field(max_length=100)
+
+
+class Challenge(BaseModel):
+    token: str = Field(min_length=32, max_length=256, repr=False)
+
+
+class ResetChallenge(Challenge):
+    password: str = Field(min_length=14, max_length=1024, repr=False)
+
+
+def public_account_request(request, db, purpose, account):
+    from orchestrator_core.core.account_recovery import reserve_attempt
+    if not get_settings().public_registration:
+        raise HTTPException(404, 'Public accounts are not enabled')
+    origin = request.headers.get('origin')
+    if request.headers.get('sec-fetch-site') == 'cross-site' or (origin and origin.rstrip('/') != str(request.base_url).rstrip('/')):
+        raise HTTPException(403, 'Cross-site account requests are not allowed')
+    address = request.client.host if request.client else 'unknown'
+    if not reserve_attempt(db, purpose, account, address):
+        raise HTTPException(429, 'Please wait before trying again', headers={'Retry-After': '900'})
+
+
+def deliver_challenge(db, user, purpose):
+    from orchestrator_core.core.account_recovery import issue_token
+    from orchestrator_core.core.mailer import send_account_link
+    token = issue_token(db, user['id'], purpose)
+    try:
+        send_account_link(user['email'], purpose, token)
+    except Exception:
+        # Never log SMTP responses, recipients or token values; responses do not reveal account existence.
+        import logging
+        logging.getLogger(__name__).warning('Account email delivery failed')
+
+
+@router.post('/register', status_code=202)
+def register(body: Signup, request: Request, db=Depends(get_db_connection)):
+    from orchestrator_core.core.account_recovery import normalize_email
+    try:
+        email = normalize_email(body.email)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    public_account_request(request, db, 'register', email)
+    user = db.execute('SELECT id,email,email_verified_at FROM users WHERE email=?', (email,)).fetchone()
+    if user is None:
+        import sqlite3
+        import psycopg
+        try:
+            identity.create_user(db, email, body.password, verified=False, actor='registration')
+        except (sqlite3.IntegrityError, psycopg.IntegrityError):
+            pass  # Concurrent registration uses the same response.
+        user = db.execute('SELECT id,email,email_verified_at FROM users WHERE email=?', (email,)).fetchone()
+    else:
+        identity.password_hash(body.password)  # Comparable password work for existing accounts.
+    if user and not user['email_verified_at']:
+        deliver_challenge(db, user, 'verify')
+    return {'message': 'If this address is eligible, check your email for a verification link.'}
+
+
+@router.post('/verify')
+def verify_email(body: Challenge, request: Request, db=Depends(get_db_connection)):
+    from orchestrator_core.core.account_recovery import consume_token
+    public_account_request(request, db, 'verify', identity.digest(body.token))
+    try:
+        consume_token(db, body.token, 'verify')
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return {'verified': True}
+
+
+@router.post('/password/reset/request', status_code=202)
+def request_password_reset(body: EmailRequest, request: Request, db=Depends(get_db_connection)):
+    from orchestrator_core.core.account_recovery import normalize_email
+    try:
+        email = normalize_email(body.email)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    public_account_request(request, db, 'reset-request', email)
+    user = db.execute('SELECT id,email FROM users WHERE email=? AND active=1', (email,)).fetchone()
+    if user:
+        deliver_challenge(db, user, 'reset')
+    return {'message': 'If this account exists, check your email for a password reset link.'}
+
+
+@router.post('/password/reset/confirm')
+def confirm_password_reset(body: ResetChallenge, request: Request, db=Depends(get_db_connection)):
+    from orchestrator_core.core.account_recovery import consume_token
+    public_account_request(request, db, 'reset-confirm', identity.digest(body.token))
+    try:
+        consume_token(db, body.token, 'reset', body.password)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return {'changed': True, 'sessions_revoked': True}
+
+
+@router.get('/options')
+def account_options():
+    return {'registration': get_settings().public_registration}
+
+
+@router.get('/plans')
+def public_plans():
+    import os
+    from urllib.parse import urlsplit
+    from orchestrator_core.core.plans import PLANS
+    payment = os.getenv('UPGRADE_PAYMENT_URL', '').strip()
+    parsed = urlsplit(payment)
+    if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password:
+        payment = None
+    return {'plans': PLANS, 'payment_url': payment, 'payment_note': 'Plan activation is manual after administrator confirmation of payment. The payment page shows the price and terms.'}

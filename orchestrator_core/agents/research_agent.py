@@ -36,11 +36,11 @@ _PDF_ALLOWED_HOSTS = {"arxiv.org", "ar5iv.labs.arxiv.org"}
 _PDF_MAX_BYTES = 10 * 1024 * 1024   # 10 MB
 _PDF_TIMEOUT_S = 15
 
-_SYSTEM_PROMPT = """You are Aaqil's Research Agent.
-You write professional research papers, find reputable journals, summarize ArXiv papers, and manage submissions.
-Author: Farhan Aaqil — B.Tech AI/ML, JPNCE Mahbubnagar. Published researcher (ML-based Diabetes Prediction, 2025).
-Always write in formal academic style. Follow IEEE/ACM standards.
-Never suggest predatory journals. Only reputable, indexed publishers."""
+_SYSTEM_PROMPT = """You are the user's research assistant.
+Help analyze papers, develop research drafts and identify suitable venues.
+Use only author names, affiliations and research claims supplied by the user.
+Do not invent citations, credentials or results. Identify uncertainty and missing evidence.
+Write in a clear academic style and distinguish sources from your own inference."""
 
 
 def _ssrf_safe_pdf_fetch(pdf_url: str) -> str:
@@ -100,7 +100,7 @@ def _call_llm(prompt: str) -> str:
     except Exception as exc:
         err_msg = str(exc).lower()
         if "api_key" in err_msg or "401" in err_msg or "unauthorized" in err_msg or "invalid api key" in err_msg:
-            logger.warning("[research_agent] Groq auth error: %s — providing structured demo output.", exc)
+            logger.warning("[research_agent] Groq auth error: %s — providing structured demo output.", type(exc).__name__)
             return (
                 "⚠️ *Notice: Configured GROQ_API_KEY in .env is expired/invalid. Showing simulated research synthesis:*\n\n"
                 "### Literature Synthesis & Paper Analysis\n\n"
@@ -120,7 +120,7 @@ def handle(command: str, metadata: Optional[dict[str, Any]] = None) -> AgentResu
     Detects read_full_paper intent and applies the SSRF guard before fetching.
     All other commands go straight to the LLM.
     """
-    logger.info("[research_agent] Processing command: %.80s", command)
+    logger.info("[research_agent] Processing request")
 
     lower = command.lower()
     output: str

@@ -82,98 +82,59 @@ def _build_system_prompt() -> str:
 
 
 def _heuristic_classify(command: str) -> dict:
-    """Deterministic heuristic fallback when Groq API key is invalid or unavailable."""
+    """Route explicit intent before topic mentions; never execute instructions here."""
+    import difflib
     lower = command.lower().strip()
+    # Correct close misspellings of routing vocabulary, not arbitrary user text.
+    vocabulary = ('skill', 'skills', 'analysis', 'resume', 'email', 'emails', 'inbox',
+                  'unread', 'summarize', 'review', 'research', 'abstract', 'linkedin',
+                  'github', 'career', 'interview', 'journal', 'critique')
+    words = re.findall(r"[a-z]+|[^a-z]+", lower)
+    for index, word in enumerate(words):
+        if word.isalpha() and len(word) >= 4 and word not in vocabulary:
+            matches = difflib.get_close_matches(word, vocabulary, n=1, cutoff=0.82)
+            if matches:
+                words[index] = matches[0]
+    text = ''.join(words)
 
-    # Ambiguous commands
-    if any(k in lower for k in ("what should i do", "what next", "help me decide", "which one")):
-        return {
-            "agent": "career_agent",
-            "confidence": 0.45,
-            "reasoning": "Ambiguous input — requires user clarification between career and growth pathways.",
-        }
+    def has(pattern):
+        return re.search(pattern, text) is not None
 
-    # Email agent keywords
-    if any(k in lower for k in ("email", "inbox", "gmail", "mail", "send mail", "send email", "unread emails", "check inbox")):
-        return {
-            "agent": "email_agent",
-            "confidence": 0.95,
-            "reasoning": "Detected email, inbox, or outreach intent from keywords.",
-        }
+    def result(agent, confidence=0.95):
+        return {'agent': agent, 'confidence': confidence,
+                'reasoning': 'Offline intent rules selected ' + agent + '.'}
 
-    # GitHub agent keywords
-    if any(k in lower for k in ("github", "repo", "repos", "repository", "git commit", "pull request", "open issue", "github issue")):
-        return {
-            "agent": "github_agent",
-            "confidence": 0.95,
-            "reasoning": "Detected GitHub repository or development workflow intent from keywords.",
-        }
-
-    # LinkedIn agent keywords
-    if any(k in lower for k in ("linkedin", "connection note", "connect note", "recruiter", "cold dm", "inmail", "networking note")):
-        return {
-            "agent": "linkedin_agent",
-            "confidence": 0.95,
-            "reasoning": "Detected LinkedIn networking or recruiter search intent from keywords.",
-        }
-
-    # Career keywords
-    if any(k in lower for k in ("resume", "cv", "job", "cover letter", "cover-letter", "interview", "career", "skill", "internship", "application")):
-        return {
-            "agent": "career_agent",
-            "confidence": 0.95,
-            "reasoning": "Detected resume/career intent from keywords.",
-        }
-
-    # Research keywords
-    if any(k in lower for k in ("paper", "arxiv", "academic", "research", "journal", "literature", "predatory", "cite", "citation")):
-        return {
-            "agent": "research_agent",
-            "confidence": 0.95,
-            "reasoning": "Detected academic research intent from keywords.",
-        }
-
-    # Growth keywords
-    if any(k in lower for k in ("blog", "dev.to", "devto", "hashnode", "post", "tweet", "twitter", "thread", "devlog", "content")):
-        return {
-            "agent": "growth_content_agent",
-            "confidence": 0.95,
-            "reasoning": "Detected technical writing/growth intent from keywords.",
-        }
-
-    # Critic keywords
-    if any(k in lower for k in ("critique", "score", "review", "feedback", "grade", "evaluate", "rate")):
-        return {
-            "agent": "critic_agent",
-            "confidence": 0.92,
-            "reasoning": "Detected evaluation/critique intent from keywords.",
-        }
-
-    # Info / portfolio / system documentation keywords
-    if any(k in lower for k in ("farhan aaqil", "portfolio", "projects", "architecture", "how does", "how do", "how it works", "working", "about the system", "system doc")):
-        return {
-            "agent": "info_agent",
-            "confidence": 0.95,
-            "reasoning": "Detected system documentation or project portfolio inquiry.",
-        }
-
-    # General chat / greetings keywords
-    if any(k in lower for k in ("hi", "hello", "hey", "who are you", "what can you do", "toji", "jarvis", "help me", "how are you", "good morning", "good evening", "chat")):
-        return {
-            "agent": "general_chat_agent",
-            "confidence": 0.95,
-            "reasoning": "Detected conversational greeting or general assistant query.",
-        }
-
-    # Default fallback to general chat agent for conversational queries
-    return {
-        "agent": "general_chat_agent",
-        "confidence": 0.75,
-        "reasoning": "General query routed to general chat assistant.",
-    }
+    # Treat attempts to override policy as conversation, never a write intent.
+    if has(r'\b(ignore|bypass|disable|override)\b.{0,45}\b(instructions|safety|rules|approval|policy|security)\b|\bdeveloper mode\b'):
+        return result('general_chat_agent')
+    # Evaluation is a task of its own even when its object mentions another agent.
+    if has(r'\b(critique|score|grade|rate|evaluate)\b|\breview\b(?!ed)|\bcheck\b.{0,30}\b(quality|logical errors|tone|clarity)\b'):
+        if not has(r'\b(peer review|peer reviewed|reviewers|pull request|code review)\b'):
+            return result('critic_agent')
+    # A compound job search followed by correspondence is a career workflow.
+    if has(r'\b(find|search|track|apply)\b.{0,25}\b(jobs?|internships?|opportunit(?:y|ies)|applications?)\b'):
+        return result('career_agent')
+    if has(r'\b(emails?|inbox|gmail|mail|thank[ -]you note)\b'):
+        return result('email_agent')
+    # Content creation outranks the destination or subject of the content.
+    if has(r'\b(blog|dev\.to|devto|hashnode|tweet|twitter|devlog|newsletter|captions?|social media|content ideas|seo)\b|\b(write|draft|create|generate)\b.{0,25}\b(announcement|post|thread|content)\b'):
+        return result('growth_content_agent')
+    if has(r'\b(github|repos?|repository|repositories|commits?|prs?|pull requests?|release notes|issues?)\b'):
+        return result('github_agent')
+    if has(r'\b(linkedin|recruiters?|inmail|networking|connection note|connect note|cold dm|influencers?)\b|\b(find|search|connect)\b.{0,25}\b(people|profiles|someone)\b'):
+        return result('linkedin_agent')
+    if has(r'\b(resume|cv|jobs?|cover[ -]letter|interview|career|skills?|internship|applications?|elevator pitch|offers?|salary|salaries)\b'):
+        return result('career_agent')
+    if has(r'\b(papers?|arxiv|academic|research|journals?|literature|predatory|cite|citation|reviewers|neurips|state of the art|continual learning)\b|\bcompare\b.{0,35}\b(transformer|lstm|architectures)\b'):
+        return result('research_agent')
+    if has(r'\b(orchestrator|circuit breaker|router|approval gate|scheduler|sse|compare-and-set|quarantined|prompt injection|system documentation|farhan)\b'):
+        return result('info_agent')
+    if has(r'^\s*(what should i do|what next|which one)\s*[?.!]*$'):
+        return result('career_agent', 0.45)
+    return result('general_chat_agent', 0.75)
 
 
-def _call_groq(command: str) -> dict:
+def _call_groq(command: str, allow_fallback: bool = True) -> dict:
     """Make the raw Groq API call. Wrapped by circuit breaker externally."""
     settings = get_settings()
     try:
@@ -197,7 +158,7 @@ def _call_groq(command: str) -> dict:
         return json.loads(raw)
     except Exception as exc:
         err_msg = str(exc).lower()
-        if (
+        if allow_fallback and (
             "api_key" in err_msg
             or "401" in err_msg
             or "unauthorized" in err_msg
@@ -206,7 +167,7 @@ def _call_groq(command: str) -> dict:
             or "failed to validate json" in err_msg
             or "400" in err_msg
         ):
-            logger.warning("[router] Groq API returned error (%s) — using heuristic routing.", exc)
+            logger.warning("[router] Groq API returned error (%s) — using heuristic routing.", type(exc).__name__)
             return _heuristic_classify(command)
         raise
 
@@ -233,7 +194,7 @@ def prompt_hash(command: str) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
-def classify(command: str, use_cache: bool = True) -> Union[RouterResult, ClarificationNeeded]:
+def classify(command: str, use_cache: bool = True, allow_fallback: bool = True) -> Union[RouterResult, ClarificationNeeded]:
     """
     Classify a user command and return either a RouterResult or a ClarificationNeeded.
 
@@ -241,17 +202,18 @@ def classify(command: str, use_cache: bool = True) -> Union[RouterResult, Clarif
     is OPEN (i.e., Groq has been failing repeatedly).
     Uses server-side in-memory caching to eliminate redundant LLM calls.
     """
-    cache_key = command.strip().lower()
-    if use_cache and cache_key in _classification_cache:
+    from orchestrator_core.core.ownership import execution_owner
+    cache_key = str(execution_owner.get()) + ":" + command.strip().lower()
+    if use_cache and allow_fallback and cache_key in _classification_cache:
         cached_time, cached_result = _classification_cache[cache_key]
         if time.monotonic() - cached_time < ROUTER_CACHE_TTL:
-            logger.debug("[router] Cache hit for command: %s", command[:40])
+            logger.debug("[router] Classification cache hit")
             return cached_result
 
     settings = get_settings()
     threshold = settings.router_confidence_threshold
 
-    data = _groq_breaker.call(_call_groq, command)
+    data = _groq_breaker.call(_call_groq, command) if allow_fallback else _groq_breaker.call(lambda value: _call_groq(value, allow_fallback=False), command)
 
     agent = data.get("agent", "").strip()
     confidence = float(data.get("confidence", 0.0))
@@ -273,7 +235,7 @@ def classify(command: str, use_cache: bool = True) -> Union[RouterResult, Clarif
     else:
         result = RouterResult(agent=agent, confidence=confidence, reasoning=reasoning)
 
-    if use_cache:
+    if use_cache and allow_fallback:
         if len(_classification_cache) >= ROUTER_CACHE_MAX_ENTRIES:
             oldest_keys = sorted(_classification_cache, key=lambda k: _classification_cache[k][0])[:100]
             for k in oldest_keys:

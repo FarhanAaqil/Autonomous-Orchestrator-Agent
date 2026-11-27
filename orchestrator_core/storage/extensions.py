@@ -58,3 +58,52 @@ def migrate_extensions(conn):
             conn.execute("ALTER TABLE jobs ADD COLUMN work_kind TEXT NOT NULL DEFAULT 'agent'")
             conn.execute("ALTER TABLE jobs ADD COLUMN work_payload_json TEXT NOT NULL DEFAULT '{}'")
             conn.execute('INSERT INTO application_migrations VALUES (10)')
+        if not conn.execute('SELECT 1 FROM application_migrations WHERE version=11').fetchone():
+            conn.execute('ALTER TABLE users ADD COLUMN email TEXT')
+            conn.execute('ALTER TABLE users ADD COLUMN email_verified_at TEXT')
+            conn.execute("UPDATE users SET email=lower(username),email_verified_at=created_at")
+            conn.execute('CREATE UNIQUE INDEX idx_users_email ON users(email)')
+            conn.execute("CREATE TABLE account_tokens (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), purpose TEXT NOT NULL CHECK(purpose IN ('verify','reset')), expires_at TEXT NOT NULL, created_at TEXT NOT NULL)")
+            conn.execute('CREATE INDEX idx_account_tokens_user ON account_tokens(user_id)')
+            conn.execute('INSERT INTO application_migrations VALUES (11)')
+        if not conn.execute('SELECT 1 FROM application_migrations WHERE version=12').fetchone():
+            conn.execute("ALTER TABLE users ADD COLUMN plan TEXT NOT NULL DEFAULT 'free'")
+            conn.execute('ALTER TABLE users ADD COLUMN paid_until TEXT')
+            conn.execute("ALTER TABLE users ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'simulation'")
+            conn.execute("CREATE TABLE connections (user_id TEXT NOT NULL REFERENCES users(id), provider TEXT NOT NULL, credentials TEXT NOT NULL, key_id TEXT NOT NULL, scopes TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, last_used_at TEXT, PRIMARY KEY(user_id,provider))")
+            conn.execute('CREATE INDEX idx_connections_user ON connections(user_id)')
+            conn.execute('INSERT INTO application_migrations VALUES (12)')
+        if not conn.execute('SELECT 1 FROM application_migrations WHERE version=13').fetchone():
+            from orchestrator_core.core.ownership import OWNED_TABLES
+            for table in OWNED_TABLES:
+                conn.execute(f'ALTER TABLE {table} ADD COLUMN user_id TEXT REFERENCES users(id)')
+                conn.execute(f'CREATE INDEX idx_{table}_owner ON {table}(user_id)')
+            owner = conn.execute("SELECT id FROM users WHERE role='administrator' ORDER BY created_at,id LIMIT 1").fetchone()
+            if owner:
+                from orchestrator_core.core.ownership import adopt_legacy_rows
+                adopt_legacy_rows(conn, owner['id'])
+            conn.execute('INSERT INTO application_migrations VALUES (13)')
+        if not conn.execute('SELECT 1 FROM application_migrations WHERE version=14').fetchone():
+            from orchestrator_core.storage.event_schema import install
+            install(conn, owned=True)
+            conn.execute('INSERT INTO application_migrations VALUES (14)')
+        if not conn.execute('SELECT 1 FROM application_migrations WHERE version=15').fetchone():
+            conn.execute('ALTER TABLE provider_usage ADD COLUMN personal_key INTEGER NOT NULL DEFAULT 0')
+            conn.execute('INSERT INTO application_migrations VALUES (15)')
+        if not conn.execute('SELECT 1 FROM application_migrations WHERE version=16').fetchone():
+            conn.execute('CREATE TABLE oauth_states (state_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), provider TEXT NOT NULL, session_hash TEXT NOT NULL, verifier TEXT NOT NULL, key_id TEXT NOT NULL, expires_at TEXT NOT NULL)')
+            conn.execute('CREATE INDEX idx_oauth_states_owner ON oauth_states(user_id)')
+            conn.execute('INSERT INTO application_migrations VALUES (16)')
+
+        if not conn.execute('SELECT 1 FROM application_migrations WHERE version=17').fetchone():
+            if getattr(conn, 'dialect', None) == 'postgresql':
+                from orchestrator_core.storage.tenant_schema import install
+                install(conn)
+            conn.execute('INSERT INTO application_migrations VALUES (17)')
+
+        if not conn.execute('SELECT 1 FROM application_migrations WHERE version=18').fetchone():
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_audit_account_runs ON audit_log(actor,event,created_at)')
+            if getattr(conn, 'dialect', None) == 'postgresql':
+                from orchestrator_core.storage.tenant_schema import install_usage_summary
+                install_usage_summary(conn)
+            conn.execute('INSERT INTO application_migrations VALUES (18)')

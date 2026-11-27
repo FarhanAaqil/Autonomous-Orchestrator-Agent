@@ -1,4 +1,5 @@
 """Single metered Groq transport, with bounded deadlines and no automatic retries."""
+from contextvars import copy_context
 import queue
 import threading
 import time
@@ -21,7 +22,7 @@ def bounded_call(fn, timeout=30):
             result.put((False, exc))
         finally:
             _slots.release()
-    threading.Thread(target=run, daemon=True).start()
+    threading.Thread(target=copy_context().run, args=(run,), daemon=True).start()
     try:
         ok, value = result.get(timeout=timeout)
     except queue.Empty as exc:
@@ -33,7 +34,8 @@ def bounded_call(fn, timeout=30):
 
 class Groq:
     def __init__(self, **kwargs):
-        self.client = SDKGroq(**kwargs, timeout=30, max_retries=0)
+        self.options = kwargs
+        self.client = None
         self.chat = self
         self.completions = self
 
@@ -48,7 +50,19 @@ class Groq:
         own = db is None
         db = db or get_db()
         try:
-            reservation, limit = reserve(db, kwargs.get('messages', []), kwargs.get('max_tokens', 2048))
+            from orchestrator_core.core.ownership import execution_owner
+            from orchestrator_core.core.policy import require_execution
+            from orchestrator_core.core.connections import load_connection
+            owner = execution_owner.get()
+            require_execution(db)
+            if owner and not db.execute('SELECT 1 FROM users WHERE id=? AND active=1', (owner,)).fetchone():
+                raise RuntimeError('Account is disabled')
+            options = dict(self.options)
+            personal_key = bool(owner and db.execute("SELECT 1 FROM connections WHERE user_id=? AND provider='groq'", (owner,)).fetchone())
+            if personal_key:
+                options['api_key'] = load_connection(db, owner, 'groq')['access_token']
+            self.client = SDKGroq(**options, timeout=30, max_retries=0)
+            reservation, limit = reserve(db, kwargs.get('messages', []), kwargs.get('max_tokens', 2048), personal_key=personal_key)
             kwargs['max_tokens'] = limit
             if kwargs.pop('stream', False):
                 # A bounded completion is exposed as one compatible delta. This

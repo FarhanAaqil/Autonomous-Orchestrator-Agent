@@ -57,7 +57,7 @@ def ddg_search(query: str, max_results: int = 5) -> list[dict[str, str]]:
         _ddg_breaker.record_success()
         return results
     except Exception as exc:
-        logger.warning("[ddg_search] DuckDuckGo search error: %s", exc)
+        logger.warning("[ddg_search] DuckDuckGo search error: %s", type(exc).__name__)
         _ddg_breaker.record_failure()
         return [{
             "title": f"Results for '{query}'",
@@ -95,7 +95,7 @@ def ddg_news_search(query: str, max_results: int = 5) -> list[dict[str, str]]:
         _ddg_breaker.record_success()
         return results
     except Exception as exc:
-        logger.warning("[ddg_search] DuckDuckGo news error: %s", exc)
+        logger.warning("[ddg_search] DuckDuckGo news error: %s", type(exc).__name__)
         _ddg_breaker.record_failure()
         return [{
             "title": f"Recent developments in {query}",

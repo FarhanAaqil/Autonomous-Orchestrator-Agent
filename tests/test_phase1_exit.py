@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 import pytest
 
-from orchestrator_core.agents import email_agent, github_agent, growth_content_agent, linkedin_agent
+from orchestrator_core.agents import email_agent, github_agent, growth_content_agent
 from orchestrator_core.core import approval_gate as gate
 from orchestrator_core.core.action_catalog import normalize_action
 from orchestrator_core.exceptions import SecurityPolicyViolationError, KillSwitchActiveError
@@ -15,7 +15,6 @@ from orchestrator_core.storage.db import SCHEMA_SQL, run_migrations
     (github_agent, "create issue on owner/repo", "Title: Problem\nDetails"),
     (github_agent, "comment on issue #12 in owner/repo", "Comment text"),
     (growth_content_agent, "publish on hashnode", "# Article\nContent"),
-    (linkedin_agent, "post on linkedin", "A post"),
 ])
 def test_every_action_producer_emits_catalog_payload(agent, command, draft):
     with patch.object(agent, "_call_llm", return_value=draft):
