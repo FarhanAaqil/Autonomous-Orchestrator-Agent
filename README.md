@@ -55,7 +55,7 @@ The local runner disables dotenv loading and external sockets and uses disposabl
 
 In `frontend`, run `npm run lint`, `npm test`, and `npm run build`. Browser workflows use `python scripts/phase3_browser_server.py` on port 8081, then `npm --prefix frontend run test:browser`; this fixture has separate test accounts and simulation-only data.
 
-On 2026-11-27 the complete isolated suite passed **413 tests with no skips**, with disposable PostgreSQL, RLS and encrypted restore enabled. The latest browser run passed **13 workflows**. The frontend builds and passes lint, its 6 unit tests, and the configured asset budgets. Three desktop endpoint checks also passed. These are local results; no production database upgrade was performed.
+On 2026-11-27 the complete isolated suite passed **440 tests with no skips**, with disposable PostgreSQL, RLS and encrypted restore enabled. The latest browser run passed **13 workflows**. The frontend builds and passes lint, its 6 unit tests, and the configured asset budgets. Three desktop endpoint checks also passed. These are local results; no production database upgrade was performed.
 
 The corrected frozen offline router evaluation measured **71/106 (67.0%)**, below the unchanged **90%** accuracy gate and several per-class F1 gates. Development-only intent improvements scored 102/103 on the development split but did not generalize sufficiently. The former label-derived 100% score was invalid. The release gate remains failing; do not bypass it or report the release complete. No live provider evaluation was performed.
 
@@ -71,7 +71,7 @@ Pricing reads the server-owned limits. An optional HTTPS payment link opens the 
 - Account export and password-confirmed deletion are implemented. Deletion removes active SQL records and vectors, revokes sessions, preserves the last administrator, and waits for running work to finish. Vector writes recheck current ownership inside the deletion lock; failed cleanup leaves the account available for retry.
 - Operator verification/configuration for Gmail OAuth and publishing connections. Consent, payload, receipt, rejection and timeout behavior are covered by mocked tests; no live publishing was performed.
 - Daily run allowances now count admitted synchronous requests and queued jobs together, including failed attempts. Accounts in their first 24 hours are limited to 10 attempts per rolling hour, including Pro accounts. Request concurrency is bounded per account and globally in one API process; multiple API processes require coordinated admission. A dispatch that also queues background work consumes one attempt for each work unit.
-- Passing genuine router quality gates, nightly production backup scheduling, uptime/error tracking, final deployment/load/recovery checks, and independent security review.
+- Passing genuine router quality gates, production activation of nightly backups, external uptime/error alerting, final deployment/load/recovery checks, and independent security review.
 - Real domain/hosting, SMTP, OAuth applications, connection encryption keys, payment details, and human review of legal drafts.
 
 The Compose `public` profile provides a Caddy proxy; it does not establish launch readiness. Public registration defaults to disabled. Keep the installation private until these gates pass. Existing running containers are not automatically upgraded by source commits.
@@ -80,7 +80,7 @@ The Compose `public` profile provides a Caddy proxy; it does not establish launc
 
 See [the runtime notes](docs/phase2-runtime.md), [approval security notes](docs/phase1-security.md), and the repository's local `implementation.md` for tracked work. Older runbooks and screenshots may describe earlier releases; verify commands against the current code.
 
-PostgreSQL backup tooling is in `orchestrator_core.storage.postgres_backup`. It encrypts archives, requires an empty restore destination, revokes restored sessions, and marks vectors for rebuilding. Store encryption keys separately from archives. Account deletion does not rewrite existing encrypted backup archives. Operators must document and enforce their archive retention period and reapply deletions before making a restored database available to users. No recovery-time or recovery-point objective is claimed without a measured deployment drill.
+Nightly backup templates and retention/monitoring instructions are in [backup operations](docs/backup-operations.md). They are opt-in and have not been activated on production. PostgreSQL backup tooling is in `orchestrator_core.storage.postgres_backup`. It encrypts archives, requires an empty restore destination, revokes restored sessions, and marks vectors for rebuilding. Store encryption keys separately from archives. Account deletion does not rewrite existing encrypted backup archives. Operators must document and enforce their archive retention period and reapply deletions before making a restored database available to users. No recovery-time or recovery-point objective is claimed without a measured deployment drill.
 
 ## License
 
