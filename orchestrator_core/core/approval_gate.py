@@ -373,7 +373,9 @@ def approve(
         raise ApprovalTamperedError(approval_id)
 
     # SEC-03: Sign approval with HMAC
-    require_adapter(row["action_type"])
+    require_adapter(row["action_type"], personal=row["user_id"] is not None)
+    if row['action_type'] == 'publish_hashnode' and row['execution_mode'] == 'live' and not json.loads(row['payload_json']).get('publication_id'):
+        raise SecurityPolicyViolationError('Choose a Hashnode publication in a revised proposal before approving.')
     decided_at = datetime.now(timezone.utc).isoformat()
     approved_hash = stored_hash
     signature = generate_approval_signature(approval_id, approved_hash, decided_at, context=_consent_context(row))
@@ -647,11 +649,16 @@ def execute_approved(approval_id: str, db: sqlite3.Connection) -> dict:
         raise SecurityPolicyViolationError("Execution mode changed; edit and review a new proposal.")
     # Resolve personal credentials before claiming; missing grants have no side effect.
     personal_token = None
+    personal_provider = None
     if row['user_id'] is not None and row['execution_mode'] == 'live':
-        if row['action_type'] != 'send_email':
+        personal_provider = {'send_email': 'gmail_send', 'github_create_issue': 'github', 'github_comment': 'github', 'publish_devto': 'devto', 'publish_hashnode': 'hashnode'}.get(row['action_type'])
+        if not personal_provider:
             raise SecurityPolicyViolationError('This personal publishing adapter is not available.')
+        if row['action_type'] == 'publish_hashnode' and not json.loads(row['payload_json']).get('publication_id'):
+            raise SecurityPolicyViolationError('Edit the proposal to include a Hashnode publication_id, then review it again.')
         from orchestrator_core.core.personal_providers import access_token
-        personal_token = access_token(db, row['user_id'], 'gmail_send', ['https://www.googleapis.com/auth/gmail.send'])
+        scopes = ['https://www.googleapis.com/auth/gmail.send'] if personal_provider == 'gmail_send' else []
+        personal_token = access_token(db, row['user_id'], personal_provider, scopes)
     attempt_id = str(uuid.uuid4())
     started_at = datetime.now(timezone.utc).isoformat()
     db.execute("BEGIN IMMEDIATE")
@@ -660,11 +667,12 @@ def execute_approved(approval_id: str, db: sqlite3.Connection) -> dict:
         if row['execution_mode'] != account_execution_mode(db, row['user_id']):
             raise SecurityPolicyViolationError('Execution mode changed; review a new proposal.')
         if row['user_id'] is not None and row['execution_mode'] == 'live':
-            if not db.execute("SELECT 1 FROM connections WHERE user_id=? AND provider='gmail_send' AND status='connected'", (row['user_id'],)).fetchone():
-                raise SecurityPolicyViolationError('Reconnect Gmail before sending.')
+            if not db.execute("SELECT 1 FROM connections WHERE user_id=? AND provider=? AND status='connected'", (row['user_id'], personal_provider)).fetchone():
+                raise SecurityPolicyViolationError('Reconnect the personal provider before executing.')
             from orchestrator_core.core.plans import require_capacity
             used = db.execute("SELECT COUNT(*) FROM execution_attempts e JOIN approvals a ON a.id=e.approval_id WHERE e.user_id=? AND a.action_type='send_email' AND a.execution_mode='live' AND substr(e.started_at,1,10)=?", (row['user_id'], started_at[:10])).fetchone()[0]
-            require_capacity(db, row['user_id'], 'emails_per_day', used)
+            if row['action_type'] == 'send_email':
+                require_capacity(db, row['user_id'], 'emails_per_day', used)
         target_policy = evaluate_target_policy(row["action_type"], row["target"], db, owner=row["user_id"])
         if not target_policy["allowed"]:
             raise SecurityPolicyViolationError(target_policy["reason"])
@@ -783,12 +791,14 @@ def _dispatch_action(action_type: str, payload: dict[str, Any], approval_id: str
 
 def _dispatch_personal(action_type, payload, approval_id, mode, token):
     """SDK_EXECUTOR: personal writes never fall back to operator credentials."""
-    require_adapter(action_type)
+    require_adapter(action_type, personal=True)
     action_type, payload, _ = normalize_action(action_type, payload)
     if mode == 'simulation':
         return {'outcome': 'simulated', 'receipt': {'mode': 'simulation', 'external_effect': False}}
-    if mode != 'live' or action_type != 'send_email' or not token:
+    if mode != 'live' or not token:
         return {'outcome': 'failed', 'error_class': 'PersonalConnectionRequired'}
+    if action_type != 'send_email':
+        return _publish_personal(action_type, payload, token)
     import base64
     import requests
     from email.message import EmailMessage
@@ -808,4 +818,51 @@ def _dispatch_personal(action_type, payload, approval_id, mode, token):
                 return {'outcome': 'submitted', 'receipt': {'provider': 'gmail', 'message_id': identifier}}
         return {'outcome': 'outcome_unknown', 'error_class': 'UnconfirmedProviderResponse'}
     except (requests.RequestException, ValueError):
+        return {'outcome': 'outcome_unknown', 'error_class': 'UnconfirmedProviderResponse'}
+
+
+def _publish_personal(action_type, payload, token):
+    """SDK_EXECUTOR: one request, no retries after an uncertain external effect."""
+    import requests
+    headers = {'Authorization': 'Bearer ' + token, 'Accept': 'application/json'}
+    if action_type in ('github_create_issue', 'github_comment'):
+        provider = 'github'
+        url = 'https://api.github.com/repos/' + payload['repo'] + '/issues'
+        body = {'body': payload['body']}
+        if action_type == 'github_create_issue':
+            body['title'] = payload['title']
+        else:
+            url += '/' + str(payload['issue_number']) + '/comments'
+        headers['Accept'] = 'application/vnd.github+json'
+        expected = 201
+    elif action_type == 'publish_devto':
+        provider = 'devto'
+        url = 'https://dev.to/api/articles'
+        headers = {'api-key': token, 'Accept': 'application/vnd.forem.api-v1+json'}
+        body = {'article': {'title': payload['title'], 'body_markdown': payload['content'], 'published': True}}
+        expected = 201
+    elif action_type == 'publish_hashnode':
+        if not payload.get('publication_id'):
+            return {'outcome': 'failed', 'error_class': 'PublicationRequired'}
+        provider = 'hashnode'
+        url = 'https://gql-beta.hashnode.com'
+        headers['x-hashnode-client'] = 'toji-orchestrator'
+        body = {'query': 'mutation ($input: PublishPostInput!) { publishPost(input: $input) { post { id } } }', 'variables': {'input': {'publicationId': payload['publication_id'], 'title': payload['title'], 'contentMarkdown': payload['content']}}}
+        expected = 200
+    else:
+        return {'outcome': 'failed', 'error_class': 'UnsupportedPersonalAction'}
+    try:
+        response = requests.post(url, headers=headers, json=body, timeout=20, allow_redirects=False)
+        if response.status_code in (400, 401, 403, 404, 422, 429):
+            return {'outcome': 'failed', 'error_class': 'ProviderRejected'}
+        if response.status_code == expected:
+            data = response.json()
+            if provider == 'hashnode':
+                data = (data.get('data') or {}).get('publishPost') or {}
+                data = data.get('post') or {}
+            identifier = data.get('id')
+            if isinstance(identifier, (str, int)) and not isinstance(identifier, bool) and identifier:
+                return {'outcome': 'submitted', 'receipt': {'provider': provider, 'id': str(identifier)}}
+        return {'outcome': 'outcome_unknown', 'error_class': 'UnconfirmedProviderResponse'}
+    except (requests.RequestException, ValueError, TypeError, AttributeError):
         return {'outcome': 'outcome_unknown', 'error_class': 'UnconfirmedProviderResponse'}
