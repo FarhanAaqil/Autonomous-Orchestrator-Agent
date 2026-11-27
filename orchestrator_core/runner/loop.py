@@ -236,11 +236,11 @@ def run_job(
                 idx=step_idx,
                 kind="error",
                 name="llm_generation_error",
-                output_json=str(exc),
+                output_json=type(exc).__name__,
                 ok=False,
                 db=db,
             )
-            return JobService.transition(job.id, "failed", db, error=f"LLM failure: {exc}", worker_id=worker_id)
+            return JobService.transition(job.id, "failed", db, error=f"LLM generation failed ({type(exc).__name__}); check your provider connection and retry", worker_id=worker_id)
 
         # 5. Parse action envelope
         parsed = _extract_json_payload(str(raw_llm_out))

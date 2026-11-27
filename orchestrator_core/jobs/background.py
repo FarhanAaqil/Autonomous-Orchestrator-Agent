@@ -43,4 +43,4 @@ def run_background_job(job, db, worker_id='worker-1', **unused):
         from orchestrator_core.exceptions import JobClaimConflictError
         if isinstance(exc, JobClaimConflictError):
             raise
-        return JobService.transition(job.id, 'failed', db, error=str(exc), worker_id=worker_id)
+        return JobService.transition(job.id, 'failed', db, error='Background work failed (' + type(exc).__name__ + ')', worker_id=worker_id)
