@@ -90,6 +90,8 @@ def require_schedule_capacity(db, user_id, excluding=None):
 
 def usage_summary(db, user_id):
     day = datetime.now(timezone.utc).date().isoformat()
+    if getattr(db, 'dialect', None) == 'postgresql':
+        return db.execute('SELECT public.account_usage_summary(?,?)', (user_id, day)).fetchone()[0]
     return {
         'day_utc': day,
         'month_utc': day[:7],

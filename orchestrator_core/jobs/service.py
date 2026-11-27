@@ -55,6 +55,9 @@ class JobService:
         owner: Optional[str] = None,
     ) -> JobRecord:
         """Create and queue a new autonomous job."""
+        if owner is None:
+            from orchestrator_core.core.ownership import execution_owner
+            owner = execution_owner.get()
         for table, reference in (("jobs", parent_job_id), ("conversations", session_id), ("schedules", schedule_id)):
             if reference and not db.execute(
                 f"SELECT id FROM {table} WHERE id=? AND COALESCE(user_id,'')=?",

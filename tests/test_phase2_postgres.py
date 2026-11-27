@@ -11,9 +11,20 @@ def pg():
     if not url:
         pytest.skip('Set PHASE2_TEST_DATABASE_URL to a disposable PostgreSQL database')
     conn = connect(url, pooled=False)
+    from orchestrator_core.core.identity import create_user
+    from orchestrator_core.core.ownership import execution_owner
+    import uuid
+    # Legacy fixture databases need an administrator for the ownership backfill.
+    if conn.execute("SELECT to_regclass('public.users')").fetchone()[0] and not conn.execute("SELECT 1 FROM users WHERE role='administrator'").fetchone():
+        create_user(conn, 'migration-' + uuid.uuid4().hex, 'fixture-password-123', 'administrator')
     migrate(conn)
-    yield conn
-    conn.close()
+    owner = create_user(conn, 'pg-' + uuid.uuid4().hex, 'fixture-password-123', 'administrator')['id']
+    marker = execution_owner.set(owner)
+    try:
+        yield conn
+    finally:
+        execution_owner.reset(marker)
+        conn.close()
 
 
 def test_parameters_preserve_literals():
@@ -53,12 +64,16 @@ def race(operation):
     from concurrent.futures import ThreadPoolExecutor
     from threading import Barrier
     barrier = Barrier(2)
+    from orchestrator_core.core.ownership import execution_owner
+    owner = execution_owner.get()
     def run(index):
         db = connect(os.environ['PHASE2_TEST_DATABASE_URL'], pooled=False)
+        marker = execution_owner.set(owner)
         try:
             barrier.wait(timeout=5)
             return operation(db, index)
         finally:
+            execution_owner.reset(marker)
             db.close()
     with ThreadPoolExecutor(max_workers=2) as pool:
         return list(pool.map(run, range(2)))

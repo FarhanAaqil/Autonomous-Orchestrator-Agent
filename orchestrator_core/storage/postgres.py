@@ -176,7 +176,7 @@ def verify_schema(conn):
     if not conn.execute("SELECT to_regclass('public.application_migrations')").fetchone()[0]:
         raise RuntimeError('Application migrations are missing; run the migration command')
     versions = {row[0] for row in conn.execute('SELECT version FROM application_migrations').fetchall()}
-    if versions != set(range(2, 17)):
+    if versions != set(range(2, 18)):
         raise RuntimeError('Application schema does not match this release; run the migration command')
 
 
@@ -184,3 +184,12 @@ def verify_runtime_role(conn):
     row = conn.execute("SELECT rolsuper,rolcreaterole,rolcreatedb,rolbypassrls FROM pg_roles WHERE rolname=current_user").fetchone()
     if any(row[index] for index in range(4)) or conn.execute("SELECT has_schema_privilege(current_user,'public','CREATE')").fetchone()[0]:
         raise RuntimeError('The application database role must not have administration or schema creation privileges')
+    verify_tenant_boundaries(conn)
+
+
+def verify_tenant_boundaries(conn):
+    from orchestrator_core.storage.tenant_schema import TENANT_TABLES
+    for table in TENANT_TABLES:
+        row = conn.execute("SELECT c.relrowsecurity,pg_has_role(current_user,c.relowner,'MEMBER'),a.attnotnull FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_attribute a ON a.attrelid=c.oid AND a.attname='user_id' WHERE n.nspname='public' AND c.relname=?", (table,)).fetchone()
+        if not row or not row[0] or row[1] or not row[2]:
+            raise RuntimeError('Runtime database must enforce account ownership for ' + table)

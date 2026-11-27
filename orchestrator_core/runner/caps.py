@@ -46,13 +46,11 @@ def check_guards(
     budget_limit = float(row_budget["value"]) if row_budget else 5.0
 
     today_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    cost_row = db.execute(
-        "SELECT COALESCE(SUM(COALESCE(cost_usd,reserved_cost)), 0.0) FROM provider_usage WHERE substr(used_at,1,10) = ?",
-        (today_utc,),
-    ).fetchone()
-    total_cost_today = float(cost_row[0]) if cost_row else 0.0
+    from orchestrator_core.core.usage import platform_spend
+    total_cost_today = float(platform_spend(db, today_utc))
+    personal_key = job.user_id is not None and db.execute("SELECT 1 FROM connections WHERE user_id=? AND provider='groq' AND status='connected'", (job.user_id,)).fetchone() is not None
 
-    if total_cost_today >= budget_limit:
+    if not personal_key and total_cost_today >= budget_limit:
         logger.critical(
             "Daily budget exceeded: $%.2f >= $%.2f. Halting job %s",
             total_cost_today, budget_limit, job.id,

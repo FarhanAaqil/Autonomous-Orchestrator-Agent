@@ -41,7 +41,7 @@ def reserve(db, messages, output_limit, personal_key=False):
         cost = (prompt * INPUT_PER_MILLION + output_limit * OUTPUT_PER_MILLION) / 1_000_000
         limit_row = db.execute("SELECT value FROM system_flags WHERE key='daily_budget_usd'").fetchone()
         limit = float(limit_row[0]) if limit_row else 5.0
-        spent = db.execute('SELECT COALESCE(SUM(COALESCE(cost_usd,reserved_cost)),0) FROM provider_usage WHERE substr(used_at,1,10)=?', (timestamp[:10],)).fetchone()[0]
+        spent = platform_spend(db, timestamp[:10])
         if not personal_key and spent + cost > limit:
             raise BudgetExceededError(spent+cost, limit)
         db.execute('INSERT INTO provider_usage (id,job_id,used_at,reserved_tokens,reserved_cost,state,user_id,personal_key) VALUES (?,?,?,?,?,?,?,?)',
@@ -62,3 +62,9 @@ def settle(db, reservation, usage):
     with db:
         db.execute("UPDATE provider_usage SET tokens_in=?,tokens_out=?,cost_usd=CASE WHEN personal_key=1 THEN 0 ELSE ? END,state='reported' WHERE id=? AND state='reserved'",
                    (incoming, outgoing, cost, reservation))
+
+
+def platform_spend(db, day):
+    if getattr(db, 'dialect', None) == 'postgresql':
+        return db.execute('SELECT public.platform_daily_spend(?)', (day,)).fetchone()[0]
+    return db.execute('SELECT COALESCE(SUM(COALESCE(cost_usd,reserved_cost)),0) FROM provider_usage WHERE substr(used_at,1,10)=?', (day,)).fetchone()[0]

@@ -94,3 +94,9 @@ def migrate_extensions(conn):
             conn.execute('CREATE TABLE oauth_states (state_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), provider TEXT NOT NULL, session_hash TEXT NOT NULL, verifier TEXT NOT NULL, key_id TEXT NOT NULL, expires_at TEXT NOT NULL)')
             conn.execute('CREATE INDEX idx_oauth_states_owner ON oauth_states(user_id)')
             conn.execute('INSERT INTO application_migrations VALUES (16)')
+
+        if not conn.execute('SELECT 1 FROM application_migrations WHERE version=17').fetchone():
+            if getattr(conn, 'dialect', None) == 'postgresql':
+                from orchestrator_core.storage.tenant_schema import install
+                install(conn)
+            conn.execute('INSERT INTO application_migrations VALUES (17)')
