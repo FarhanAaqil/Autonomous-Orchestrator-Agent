@@ -18,7 +18,6 @@ from orchestrator_core.core.provider import Groq
 
 from orchestrator_core.config import get_settings
 from orchestrator_core.models import MemoryItemRecord
-from orchestrator_core.storage.chroma_client import get_agent_collection
 
 logger = logging.getLogger(__name__)
 
@@ -119,17 +118,8 @@ def summarize_session(
 
     # 4. Sync to ChromaDB
     try:
-        coll = get_agent_collection("episodes", client=chroma_client)
-        coll.upsert(
-            ids=[item_id],
-            documents=[summary_text.strip()],
-            metadatas=[{
-                "user_id": owner or "",
-                "id": item_id,
-                "kind": "episode_summary",
-                "source_session_id": session_id,
-            }],
-        )
+        from orchestrator_core.memory.vector_write import synchronize_item
+        synchronize_item(db, item_id, owner, client=chroma_client, name='episodes')
         logger.info("[episodic] Episode summary vector stored in ChromaDB (id=%s).", item_id)
     except Exception as exc:
         logger.warning("[episodic] ChromaDB sync failed for episode %s: %s", item_id, type(exc).__name__)

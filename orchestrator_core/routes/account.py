@@ -134,3 +134,23 @@ def export_account(db=Depends(get_db_connection), owner=Depends(personal_owner))
                 raise HTTPException(413, 'This account requires an administrator-assisted export; no partial export was produced')
             data['records'][table] = [dict(row) for row in rows]
     return JSONResponse(data, headers={'Content-Disposition': 'attachment; filename="toji-account.json"', 'Cache-Control': 'no-store'})
+
+
+class AccountDeletion(BaseModel):
+    password: SecretStr
+    confirmation: str
+
+
+@router.post('/delete')
+def delete_account(body: AccountDeletion, db=Depends(get_db_connection), owner=Depends(personal_owner)):
+    from fastapi.responses import JSONResponse
+    from orchestrator_core.core.account_data import remove_account, AccountRemovalError
+    if body.confirmation != 'DELETE MY ACCOUNT':
+        raise HTTPException(400, 'Type DELETE MY ACCOUNT to confirm')
+    try:
+        remove_account(db, owner, body.password.get_secret_value())
+    except AccountRemovalError as exc:
+        raise HTTPException(409, str(exc)) from None
+    response = JSONResponse({'deleted': True}, headers={'Cache-Control': 'no-store'})
+    response.delete_cookie('orchestrator_session', path='/')
+    return response

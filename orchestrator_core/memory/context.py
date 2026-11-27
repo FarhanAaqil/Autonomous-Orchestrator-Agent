@@ -33,23 +33,31 @@ def build_context(db, conversation_id, query='', budget=6000, owner=None):
 
 
 def synchronize_vectors(db, collection=None):
-    from orchestrator_core.storage.chroma_client import get_agent_collection
     from orchestrator_core.core.provider import bounded_call
+    from orchestrator_core.memory.vector_write import synchronize_item
     rows = db.execute('SELECT * FROM memory_items WHERE vector_synced_at IS NULL OR vector_synced_at<>updated_at ORDER BY updated_at LIMIT 10').fetchall()
+    pg = getattr(db, 'dialect', None) == 'postgresql'
+    source = db.raw.info.dsn if pg else db.execute('PRAGMA database_list').fetchone()[2]
     completed = 0
     for row in rows:
         def sync(row=dict(row)):
-            coll = collection or get_agent_collection('memory')
-            if row['deleted'] or row['pending_review']:
-                coll.delete(ids=[row['id']])
+            if not source:  # Isolated in-memory development/test database.
+                return synchronize_item(db, row['id'], row['user_id'], collection=collection)
+            if pg:
+                from orchestrator_core.storage.postgres import connect
+                target = connect(source, pooled=False)
             else:
-                coll.upsert(ids=[row['id']], documents=[row['value']], metadatas=[{'kind': row['kind'], 'user_id': row['user_id'] or ''}])
+                from orchestrator_core.storage.db import get_db
+                target = get_db(source)
+            try:
+                return synchronize_item(target, row['id'], row['user_id'], collection=collection)
+            finally:
+                target.close()
         try:
-            bounded_call(sync, timeout=10)
+            # An interrupted writer keeps its own connection and deletion lock;
+            # it cannot later resurrect a row deleted by a successful removal.
+            changed = bounded_call(sync, timeout=10) if source else sync()
+            completed += int(bool(changed))
         except Exception:
-            continue  # Durable timestamp mismatch remains for the next retry.
-        with db:
-            db.execute('UPDATE memory_items SET vector_synced_at=? WHERE id=? AND updated_at=?',
-                       (row['updated_at'], row['id'], row['updated_at']))
-        completed += 1
+            continue
     return completed

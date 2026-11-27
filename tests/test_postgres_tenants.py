@@ -190,3 +190,19 @@ def test_missing_admin_rolls_back_rls_migration(legacy_database):
     row = db.execute("SELECT title,user_id FROM conversations WHERE id='legacy'").fetchone()
     assert row['title'] == 'Preserve me' and row['user_id'] is None
     assert not db.execute("SELECT relrowsecurity FROM pg_class WHERE oid='conversations'::regclass").fetchone()[0]
+
+
+def test_account_deletion_respects_rls_and_other_users(tenants):
+    from unittest.mock import Mock
+    from orchestrator_core.core.account_data import remove_account
+    db, alice, bob = tenants
+    vectors = Mock()
+    vectors.get_or_create_collection.return_value.get.return_value = {'ids': []}
+    with scope(alice):
+        db.execute("INSERT INTO conversations(id,title,user_id) VALUES (?, 'Keep Alice', ?)", ('keep-' + alice, alice))
+    with scope(bob):
+        db.execute("INSERT INTO conversations(id,title,user_id) VALUES (?, 'Delete Bob', ?)", ('delete-' + bob, bob))
+        remove_account(db, bob, 'fixture-password-123', vectors)
+    assert db.execute('SELECT 1 FROM users WHERE id=?', (bob,)).fetchone() is None
+    with scope(alice):
+        assert db.execute('SELECT title FROM conversations WHERE id=?', ('keep-' + alice,)).fetchone()[0] == 'Keep Alice'

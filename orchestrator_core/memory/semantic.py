@@ -21,29 +21,16 @@ from typing import Any, Optional
 import uuid
 
 from orchestrator_core.models import MemoryItemKind, MemoryItemRecord
-from orchestrator_core.storage.chroma_client import get_agent_collection
 
 logger = logging.getLogger(__name__)
 
 
-def _sync_to_chroma(
-    item_id: str,
-    text: str,
-    metadata: dict[str, Any],
-    client: Optional[Any] = None,
-) -> None:
-    """Best-effort upsert of memory item into ChromaDB."""
+def _sync_to_chroma(item_id, text, metadata, client=None, db=None):
     try:
-        coll = get_agent_collection("memory", client=client)
-        # Filter None values from metadata for ChromaDB compatibility
-        safe_meta = {k: ("" if v is None else str(v) if isinstance(v, (bool, int, float)) else str(v)) for k, v in metadata.items()}
-        coll.upsert(
-            ids=[item_id],
-            documents=[text],
-            metadatas=[safe_meta],
-        )
+        from orchestrator_core.memory.vector_write import synchronize_item
+        synchronize_item(db, item_id, metadata.get('user_id') or None, client=client)
     except Exception as exc:
-        logger.warning("[memory] ChromaDB sync failed for item %s: %s", item_id, type(exc).__name__)
+        logger.warning('Memory vector sync failed: %s', type(exc).__name__)
 
 
 def _row_to_record(row: sqlite3.Row) -> MemoryItemRecord:
@@ -130,7 +117,7 @@ def remember(
         "pending_review": "1" if pending_review else "0",
         "source_session_id": source_session_id or "",
     }
-    _sync_to_chroma(item_id, doc_text, meta, client=chroma_client)
+    _sync_to_chroma(item_id, doc_text, meta, client=chroma_client, db=db)
 
     logger.info("[memory] Remembered %s (id=%s, pending=%s)", kind, item_id, pending_review)
     return get_memory_item(item_id, db, owner=owner)  # type: ignore[return-value]
@@ -214,7 +201,7 @@ def confirm(
             "pending_review": "0",
             "source_session_id": item.source_session_id or "",
         }
-        _sync_to_chroma(item_id, doc_text, meta, client=chroma_client)
+        _sync_to_chroma(item_id, doc_text, meta, client=chroma_client, db=db)
 
     logger.info("[memory] Confirmed memory item %s", item_id)
     return item  # type: ignore[return-value]
@@ -263,7 +250,7 @@ def update_memory_item(
             "pending_review": "1" if updated.pending_review else "0",
             "source_session_id": updated.source_session_id or "",
         }
-        _sync_to_chroma(item_id, doc_text, meta, client=chroma_client)
+        _sync_to_chroma(item_id, doc_text, meta, client=chroma_client, db=db)
 
     logger.info("[memory] Updated memory item %s", item_id)
     return updated  # type: ignore[return-value]

@@ -46,6 +46,26 @@
         "title": "AccountCreate",
         "type": "object"
       },
+      "AccountDeletion": {
+        "properties": {
+          "confirmation": {
+            "title": "Confirmation",
+            "type": "string"
+          },
+          "password": {
+            "format": "password",
+            "title": "Password",
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "password",
+          "confirmation"
+        ],
+        "title": "AccountDeletion",
+        "type": "object"
+      },
       "AgentInfo": {
         "properties": {
           "allowed_tools": {
@@ -2276,6 +2296,50 @@
           }
         ],
         "summary": "Start Connection",
+        "tags": [
+          "Account"
+        ]
+      }
+    },
+    "/account/delete": {
+      "post": {
+        "operationId": "delete_account_account_delete_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountDeletion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Account",
         "tags": [
           "Account"
         ]

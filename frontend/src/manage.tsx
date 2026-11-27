@@ -45,7 +45,7 @@ export function Settings({user, tick}: Props) {
   const [passwordNotice, setPasswordNotice] = useState('');
   const paused = flags.data.find(f => f.key === 'kill_switch')?.value === 'on';
   return <><PageHead eyebrow="A WORKSPACE THAT WORKS FOR YOU" title="Stay in control."/><Banner error={flags.error || agents.error || action.error} notice={action.notice || passwordNotice}/>
-    <AccountUsage tick={tick}/><Pricing/><PersonalConnections tick={tick}/><AccountExport/>
+    <AccountUsage tick={tick}/><Pricing/><PersonalConnections tick={tick}/><AccountExport/><AccountRemoval/>
     <section className="panel"><h2>Service diagnostics</h2>{ready.error ? <p role="alert" className="banner error">A required service is unavailable. Check Docker Compose logs and retry.</p> : Object.entries(ready.data).map(([name, ok]) => <div className="list-row" key={name}><span>{name}</span><Pill value={ok ? 'ready' : 'unavailable'}/></div>)}<button onClick={ready.reload}>Check again</button></section>
     <section className="panel"><h2>Automation & budget</h2><p>Automation is currently <strong>{paused ? 'paused' : 'active'}</strong>. Pausing prevents new work; it cannot undo an external action already submitted.</p>{user.role === 'administrator' ? <><button disabled={action.busy || flags.loading || !!flags.error} className={paused ? 'primary' : ''} onClick={() => {if (paused && !confirm('Resume automation? Queued work may start and use model budget.')) return; void action.act('/system/kill-switch', 'POST', {on: !paused});}}>{paused ? 'Resume automation' : 'Pause automation'}</button><Form busy={action.busy} label="Update daily budget" onSubmit={f => action.act('/system/budget', 'POST', {daily_budget_usd: Number(f.get('budget'))})}><Field label="Daily accounting budget (USD)" name="budget" type="number" value={flags.data.find(f => f.key === 'daily_budget_usd')?.value || '5'}/></Form></> : <p className="banner">Only administrators can change automation and budget settings.</p>}</section>
     <section className="panel"><h2>Agent availability</h2>{agents.data.map(a => <div className="list-row" key={a.id}><div><h3>{a.name}</h3><Pill value={a.is_active ? a.status : 'disabled'}/></div>{user.role === 'administrator' && <button disabled={action.busy} onClick={() => action.act('/agents/' + a.id, 'PATCH', {is_active: !a.is_active})}>{a.is_active ? 'Disable' : 'Enable'} {a.name}</button>}</div>)}</section>
@@ -113,4 +113,13 @@ function AccountExport() {
     catch (reason) {setError(reason instanceof Error ? reason.message : 'Export failed');}
     finally {setBusy(false);}
   }}>{busy ? 'Preparing your export...' : 'Export my data'}</button></section>;
+}
+
+function AccountRemoval() {
+  const action = useAction();
+  return <details className="panel"><summary>Delete my account</summary><p>This permanently removes your active account data, provider connections and stored vectors. It cannot undo actions already sent to external providers. Existing backup archives follow the operator's retention policy. Export your data first if you need a copy.</p><Banner error={action.error}/><Form busy={action.busy} label="Permanently delete my account" onSubmit={async f => {
+    if (!confirm('Permanently delete your account and active workspace data? This cannot be undone.')) return;
+    const result = await action.act('/account/delete', 'POST', {password: f.get('password'), confirmation: f.get('confirmation')});
+    if (result) window.location.reload();
+  }}><Field name="password" type="password" label="Current password for deletion"/><Field name="confirmation" label="Type DELETE MY ACCOUNT"/></Form></details>;
 }

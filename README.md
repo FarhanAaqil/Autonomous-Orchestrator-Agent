@@ -68,7 +68,7 @@ Pricing reads the server-owned limits. An optional HTTPS payment link opens the 
 ## Remaining launch gates
 
 - Final deployment and hostile multi-user review of PostgreSQL isolation. RLS and NOT NULL owner constraints are implemented, with transaction scope, worker polling, first-admin backfill, rollback and restricted-role/API tests. Production data has not been migrated.
-- Complete account deletion across SQL and vectors, including concurrent work and retryable failures. Export is implemented; deletion is not.
+- Account export and password-confirmed deletion are implemented. Deletion removes active SQL records and vectors, revokes sessions, preserves the last administrator, and waits for running work to finish. Vector writes recheck current ownership inside the deletion lock; failed cleanup leaves the account available for retry.
 - Personal GitHub/DEV/Hashnode publishing adapters with receipt/error tests; Gmail OAuth operator verification and configuration.
 - Daily admission limits covering synchronous work as well as queued jobs, and additional first-24-hour abuse limits. Request concurrency is currently bounded per account and globally in one API process; multiple API processes require coordinated admission.
 - Passing genuine router quality gates, nightly production backup scheduling, uptime/error tracking, final deployment/load/recovery checks, and independent security review.
@@ -80,7 +80,7 @@ The Compose `public` profile provides a Caddy proxy; it does not establish launc
 
 See [the runtime notes](docs/phase2-runtime.md), [approval security notes](docs/phase1-security.md), and the repository's local `implementation.md` for tracked work. Older runbooks and screenshots may describe earlier releases; verify commands against the current code.
 
-PostgreSQL backup tooling is in `orchestrator_core.storage.postgres_backup`. It encrypts archives, requires an empty restore destination, revokes restored sessions, and marks vectors for rebuilding. Store encryption keys separately from archives. No recovery-time or recovery-point objective is claimed without a measured deployment drill.
+PostgreSQL backup tooling is in `orchestrator_core.storage.postgres_backup`. It encrypts archives, requires an empty restore destination, revokes restored sessions, and marks vectors for rebuilding. Store encryption keys separately from archives. Account deletion does not rewrite existing encrypted backup archives. Operators must document and enforce their archive retention period and reapply deletions before making a restored database available to users. No recovery-time or recovery-point objective is claimed without a measured deployment drill.
 
 ## License
 
