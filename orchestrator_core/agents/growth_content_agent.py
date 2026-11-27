@@ -23,18 +23,11 @@ logger = logging.getLogger(__name__)
 AGENT_NAME = "growth_content_agent"
 TOOL_ALLOWLIST: frozenset[str] = frozenset({"google_search", "fetch_page", "propose_action"})
 
-AAQIL_BIO = """
-Farhan Aaqil — Final year B.Tech AI/ML student at JPNCE Mahbubnagar.
-Building LLM agents, LangChain pipelines, and AI systems.
-Published researcher. Intern at Jala Academy.
-GitHub: github.com/FarhanAaqil
-""".strip()
-
-_SYSTEM_PROMPT = f"""You are Aaqil's Growth and Content Agent.
-You create engaging tech content about Aaqil's projects and journey.
-Bio: {AAQIL_BIO}
-Always write in first person as Aaqil. Be authentic, technical but accessible.
-Avoid hustle culture clichés. Be real, share learnings, show the code."""
+_SYSTEM_PROMPT = """You are the user's technical writing assistant.
+Create clear, accurate content from the user's brief and supplied context.
+Do not invent an author identity, employment, credentials, or personal achievements.
+Use first person only for facts the user supplied about themselves.
+Mark missing factual details for the user to complete before publishing."""
 
 
 def _call_llm(prompt: str) -> str:
@@ -52,23 +45,7 @@ def _call_llm(prompt: str) -> str:
         )
         return response.choices[0].message.content
     except Exception as exc:
-        err_msg = str(exc).lower()
-        if "api_key" in err_msg or "401" in err_msg or "unauthorized" in err_msg or "invalid api key" in err_msg:
-            logger.warning("[growth_agent] Groq auth error: %s — providing structured demo output.", type(exc).__name__)
-            return (
-                "⚠️ *Notice: Configured GROQ_API_KEY in .env is expired/invalid. Showing simulated content:*\n\n"
-                "## Building Production Multi-Agent Systems: Why Unbypassable Gates Matter\n\n"
-                "By Farhan Aaqil\n\n"
-                "When deploying multi-agent frameworks in enterprise environments, standard LLM tool calling has a fatal flaw: "
-                "payload substitution at execution time. If an agent hallucinates or an unauthorized caller passes parameters directly to an execution endpoint, safety gates are rendered meaningless.\n\n"
-                "### The Solution: Zero-Parameter CAS Execution\n\n"
-                "In Orchestrator, we solved this with atomic Compare-And-Set (CAS) concurrency on SQLite:\n\n"
-                "```python\n"
-                "# Caller passes ONLY the approval ID — zero payload allowed at execution time\n"
-                "execute_approved(approval_id, db)\n"
-                "```\n\n"
-                "This guarantees that the exact payload reviewed and approved by a human is what gets executed by isolated SDK handlers — zero leakage, zero substitution."
-            )
+        logger.warning("Content generation failed: %s", type(exc).__name__)
         raise
 
 
@@ -100,6 +77,11 @@ def handle(command: str, metadata: Optional[dict[str, Any]] = None) -> AgentResu
             "title": output.splitlines()[0].lstrip("# ").strip() if output.strip() else "Untitled draft",
             "content": output,
         }
+    if action_type == 'publish_hashnode':
+        import re
+        publication = re.search(r'\bpublication(?:_id| id)?\s*[:=]?\s+([a-fA-F0-9]{24})\b', command)
+        if publication:
+            meta['approval_payload']['publication_id'] = publication.group(1)
     return AgentResult(
         agent="growth_content_agent",
         output=output,

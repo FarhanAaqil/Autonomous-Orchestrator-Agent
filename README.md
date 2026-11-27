@@ -61,7 +61,7 @@ The corrected frozen offline router evaluation measured **71/106 (67.0%)**, belo
 
 ## Personal accounts in this branch
 
-Settings supports separate GitHub and Gmail OAuth grants, validated DEV/Hashnode/Groq personal tokens, encrypted owner-bound storage, disconnect, personal execution mode, daily/monthly token usage, and JSON account export. Gmail is restricted to the configured beta allowlist; sending uses the account's own grant and still requires signed approval. LinkedIn is manual drafts only. Other publishing adapters remain unavailable.
+Settings supports separate GitHub and Gmail OAuth grants, validated DEV/Hashnode/Groq personal tokens, encrypted owner-bound storage, disconnect, personal execution mode, daily/monthly token usage, and JSON account export. Gmail is restricted to the configured beta allowlist; sending uses the account's own grant and still requires signed approval. LinkedIn is manual drafts only. GitHub issues/comments, DEV articles and Hashnode posts use personal connections and the same signed approval gate. Hashnode live proposals require an explicit publication ID (include `publication id: <ID>` in the brief). Provider acceptance is reported as submitted; timeouts remain uncertain and are never automatically retried.
 
 Pricing reads the server-owned limits. An optional HTTPS payment link opens the operator's configured payment page; administrators grant Pro access with an explicit expiry after verifying payment. Automatic payment webhooks are deferred. Policy pages are prominently marked **DRAFT: needs human review**. Starter templates fill an editable brief without submitting it.
 
@@ -69,7 +69,7 @@ Pricing reads the server-owned limits. An optional HTTPS payment link opens the 
 
 - Final deployment and hostile multi-user review of PostgreSQL isolation. RLS and NOT NULL owner constraints are implemented, with transaction scope, worker polling, first-admin backfill, rollback and restricted-role/API tests. Production data has not been migrated.
 - Account export and password-confirmed deletion are implemented. Deletion removes active SQL records and vectors, revokes sessions, preserves the last administrator, and waits for running work to finish. Vector writes recheck current ownership inside the deletion lock; failed cleanup leaves the account available for retry.
-- Personal GitHub/DEV/Hashnode publishing adapters with receipt/error tests; Gmail OAuth operator verification and configuration.
+- Operator verification/configuration for Gmail OAuth and publishing connections. Consent, payload, receipt, rejection and timeout behavior are covered by mocked tests; no live publishing was performed.
 - Daily run allowances now count admitted synchronous requests and queued jobs together, including failed attempts. Accounts in their first 24 hours are limited to 10 attempts per rolling hour, including Pro accounts. Request concurrency is bounded per account and globally in one API process; multiple API processes require coordinated admission. A dispatch that also queues background work consumes one attempt for each work unit.
 - Passing genuine router quality gates, nightly production backup scheduling, uptime/error tracking, final deployment/load/recovery checks, and independent security review.
 - Real domain/hosting, SMTP, OAuth applications, connection encryption keys, payment details, and human review of legal drafts.
@@ -85,3 +85,5 @@ PostgreSQL backup tooling is in `orchestrator_core.storage.postgres_backup`. It 
 ## License
 
 See [LICENSE](LICENSE).
+
+Publishing contracts were checked against the official [GitHub issues API](https://docs.github.com/en/rest/issues/issues), [Forem API](https://developers.forem.com/api/v1), and [Hashnode mutation reference](https://github.com/Hashnode/gql-skill/blob/main/skills/gql-api/references/mutations.md). Hashnode currently requires a Pro target publication for API publishing.

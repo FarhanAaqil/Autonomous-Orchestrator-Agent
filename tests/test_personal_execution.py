@@ -149,3 +149,13 @@ def test_publishing_requires_receipt_and_sanitizes_errors(monkeypatch, status, d
     monkeypatch.setattr('requests.post', Mock(return_value=Mock(status_code=status, json=Mock(return_value=data))))
     action, payload, *_ = PUBLISH_CASES[0]
     assert _dispatch_personal(action, payload, 'approval', 'live', 'fixture-token')['outcome'] == outcome
+
+
+def test_publication_proposal_uses_explicit_destination_without_inventing_one(monkeypatch):
+    from orchestrator_core.agents import growth_content_agent as agent
+    monkeypatch.setattr(agent, '_call_llm', lambda command: '# Article\nReviewed body')
+    missing = agent.handle('Publish on Hashnode')
+    assert 'publication_id' not in missing.metadata['approval_payload']
+    explicit = agent.handle('Publish on Hashnode publication id: 0123456789abcdef01234567')
+    assert explicit.metadata['approval_payload']['publication_id'] == '0123456789abcdef01234567'
+    assert 'Farhan' not in agent._SYSTEM_PROMPT
